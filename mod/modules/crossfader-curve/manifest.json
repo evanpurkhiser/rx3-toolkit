@@ -1,0 +1,38 @@
+{
+  "id": "crossfader-curve",
+  "name": {
+    "en": "USB crossfader curve (prototype)",
+    "fr": "Courbe de crossfader USB (prototype)"
+  },
+  "description": {
+    "en": "Loads one custom crossfader curve from rx3-crossfader.json on the USB drive.",
+    "fr": "Charge une courbe de crossfader personnalisée depuis rx3-crossfader.json sur la clé USB."
+  },
+  "firmwares": [
+    "1.19"
+  ],
+  "default": false,
+  "order": 95,
+  "category": "mixer",
+  "advanced": true,
+  "runtime_directory": "crossfader-curve",
+  "namespace": "crossfader_curve",
+  "requires": [],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    },
+    {
+      "source": "validate-config.awk",
+      "target": "validate-config.awk",
+      "executable": false
+    }
+  ],
+  "arm_hook": {
+    "source": "rx3_crossfader_curve.c",
+    "target": "librx3_crossfader_curve.so"
+  }
+}
