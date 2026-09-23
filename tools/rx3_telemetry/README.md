@@ -17,14 +17,16 @@ The reader emits newline-delimited JSON. State messages contain a provisional
 `prolinkState` object shaped like `prolink-connect`'s `CDJStatus.State`, so an
 adapter can pass that member directly to `MixstatusProcessor.handleState()`.
 
-The mappings for raw play state `1/2/3` to playing/cued/paused are established
-by the accessor's control flow. Media slot, track type, pitch units, and the use
-of track number as track ID remain provisional until the first hardware capture.
+The firmware's standalone play-mode enum is exposed as `rawPlayState` and a
+`mode-N` playback label. Correlate those values with playing, paused, and cued
+states during the next hardware capture before using the provisional
+`prolinkState.playState` value. Media slot, track type, pitch units, and the use
+of the track-load identifier as track ID also remain provisional.
 
 ## Feeding `MixstatusProcessor`
 
-The bridge can consume the JSON stream without bringing a Pro DJ Link network
-online:
+Once the raw mode mapping is confirmed, the bridge can consume the JSON stream
+without bringing a Pro DJ Link network online:
 
 ```ts
 import {spawn} from 'node:child_process';
@@ -50,6 +52,8 @@ processor.on('nowPlaying', state => {
 });
 ```
 
-Metadata events are keyed by deck and generation. A production adapter keeps
-the latest four fields for each deck and attaches them when `nowPlaying` fires,
-instead of asking Pro DJ Link's database service for the track.
+Metadata events are keyed by deck and generation. The current firmware module
+populates the title and sends empty artist, album, and key fields. A production
+adapter keeps the latest fields for each deck and attaches them when
+`nowPlaying` fires instead of asking Pro DJ Link's database service for the
+track.

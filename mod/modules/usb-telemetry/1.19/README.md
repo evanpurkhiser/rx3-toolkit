@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 # USB deck telemetry prototype
 
-This experimental module reports loaded state, play state, on-air state, track
-number, BPM, tempo, title, artist, album, and key for both decks through the
-XDJ-RX3's existing rear USB-B vendor HID interface.
+This experimental module reports loaded state, raw play mode, on-air state,
+track ID, BPM, tempo, and title for both decks through the XDJ-RX3's existing
+rear USB-B vendor HID interface. Artist, album, and key fields remain present
+in protocol v1 but are empty until their standalone-player sources are mapped.
 
 It is isolated from the performance core. It installs a separate `LD_PRELOAD`
 library, makes no file-level byte changes to `rbp`, adds no screen controls,
@@ -12,12 +13,14 @@ and accepts only the verified firmware 1.19 application with SHA-1
 
 ## Event flow
 
-Two guarded trampolines run after `rbp` updates its control-display and track
-metadata caches. They only set an atomic deck bit and wake a worker through a
-nonblocking local datagram socket. The worker coalesces events, reads the public
-`UiHid_Get*` accessors, and owns all USB writes. Writes use the HID gadget's
-blocking backpressure because its endpoint queues one report; this keeps the
-startup snapshot intact without ever blocking an `rbp` callback.
+Four guarded trampolines follow the standalone Player's status, track-load, and
+track-unload paths plus the Mixer's on-air update. The load hooks copy the
+firmware's title and track ID into a small seqlock-protected cache. Every hook
+then sets an atomic deck bit and wakes a worker through a nonblocking local
+datagram socket. The worker coalesces events, reads the native play-mode, BPM,
+tempo, and mixer-on-air accessors, and owns all USB writes. Writes use the HID
+gadget's blocking backpressure because its endpoint queues one report; this
+keeps complete snapshots intact without ever blocking an `rbp` callback.
 
 The firmware stores track strings as UTF-16LE. The worker converts them to
 UTF-8 before comparison and fragmentation on the wire.
@@ -50,6 +53,8 @@ The module transmits whenever a host is connected to USB-B. It does not yet
 implement the host activation handshake needed for safe coexistence with
 rekordbox or Serato. Use it only with the companion reader during bench testing.
 
-The hooks and accessor entry points are statically verified but have not run on
-hardware. Metadata bytes are transported unchanged and decoded as UTF-8 with
-replacement by the host until the player's exact string encoding is confirmed.
+The original transport ran on hardware and exposed the single-report queue's
+backpressure behavior. The standalone Player/Mixer hooks and accessor entry
+points are statically verified against firmware 1.19 and await hardware
+validation. The firmware play-mode enum is transmitted unchanged until a
+capture correlates its values with playing, paused, and cued states.
