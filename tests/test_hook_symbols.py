@@ -26,7 +26,11 @@ import unittest
 
 REPOSITORY = pathlib.Path(__file__).resolve().parent.parent
 BUILD = REPOSITORY / "build"
-HOOKS = ("librx3_core.so", "librx3_core_payload.so")
+HOOKS = (
+    "librx3_core.so",
+    "librx3_core_payload.so",
+    "librx3_usb_telemetry.so",
+)
 
 # Everything rbp itself is known to export. A new name here is a deliberate
 # decision -- confirm rbp really provides it before adding one.
@@ -35,8 +39,9 @@ ALLOWED = {
     "close", "getenv", "gettimeofday", "lseek",
     "memcmp", "memcpy", "memset",
     "mmap", "mprotect", "munmap", "open",
-    "pthread_create", "pthread_detach",
-    "read", "strlen", "sysconf", "usleep", "write",
+    "poll", "pthread_create", "pthread_detach",
+    "read", "recv", "send", "socketpair", "strlen", "sysconf", "usleep",
+    "write",
 }
 
 # Names that must never appear, with why, so a failure explains itself.

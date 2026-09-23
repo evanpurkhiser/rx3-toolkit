@@ -17,11 +17,13 @@ VARIANT ?= all
 VERSION ?= 0.0.0-dev
 PAYLOAD_DIR ?= $(BUILD_DIR)/payload
 CORE_DIR := mod/modules/core/$(FIRMWARE)
+TELEMETRY_DIR := mod/modules/usb-telemetry/$(FIRMWARE)
 # One directory per module, so a new module is picked up without editing this
 # file: its headers become hook prerequisites and its guards join `make test`.
 MODULE_HEADERS := $(wildcard mod/modules/*/$(FIRMWARE)/*.h)
 MODULE_GUARDS := $(wildcard mod/modules/*/$(FIRMWARE)/test_regressions.py)
 HOOK := $(BUILD_DIR)/librx3_core.so
+TELEMETRY_HOOK := $(BUILD_DIR)/librx3_usb_telemetry.so
 PAYLOAD_HOOK := $(BUILD_DIR)/librx3_core_payload.so
 AUTOEXEC := $(BUILD_DIR)/autoexec.bin
 PATCH_ARGS := $(foreach patch,$(MODULES),--patch $(patch))
@@ -57,11 +59,16 @@ help:
 	  'make preflight                    inspect publishable files' \
 	  'make clean                        remove build/ only'
 
-hook: $(HOOK)
+hook: $(HOOK) $(TELEMETRY_HOOK)
 
 $(HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$(CORE_DIR)/rx3_core_hook.c"
+	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
+
+$(TELEMETRY_HOOK): $(TELEMETRY_DIR)/rx3_usb_telemetry.c
+	@mkdir -p "$(BUILD_DIR)"
+	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$<"
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
 
 $(PAYLOAD_HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS)
