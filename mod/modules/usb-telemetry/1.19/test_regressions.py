@@ -40,6 +40,7 @@ require(
     "PLAYER_STATUS_UPDATED ((unsigned long)0x002f1bf8)" in SOURCE
     and "PLAYER_LOAD_TRACK ((unsigned long)0x002f20e4)" in SOURCE
     and "PLAYER_UNLOAD_RESULT ((unsigned long)0x002f1e4c)" in SOURCE
+    and "PLAYER_REF_CURRENT_TRACK ((unsigned long)0x002f1410)" in SOURCE
     and "MIXER_UPDATE_ON_AIR ((unsigned long)0x00057fb0)" in SOURCE,
     "standalone Player and Mixer hooks remain at verified entry points",
 )
@@ -68,10 +69,17 @@ require(
     "the worker applies HID gadget backpressure instead of dropping a burst",
 )
 require(
-    "MUSIC_TITLE_OFFSET 0x28u" in SOURCE
+    "MUSIC_ID_LOW_OFFSET 0x04u" in SOURCE
+    and "MUSIC_TITLE_OFFSET 0x28u" in SOURCE
     and "read_native_deck" in SOURCE
     and "utf16_to_utf8" in SOURCE,
-    "firmware UTF-16 metadata is converted before protocol fragmentation",
+    "the DBIF track ID and UTF-16 title use their verified structure offsets",
+)
+require(
+    "if (result && index >= 0 && music_info)" in SOURCE
+    and "if (deck->loaded)" in SOURCE
+    and "if (index >= 0 && !current_track)" in SOURCE,
+    "load and unload events follow the player's committed track state",
 )
 require(
     "cache->generation = generation;" in SOURCE

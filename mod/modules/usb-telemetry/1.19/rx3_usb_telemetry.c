@@ -84,21 +84,23 @@ extern int usleep(unsigned int);
 #define PLAYER_STATUS_UPDATED ((unsigned long)0x002f1bf8)
 #define PLAYER_LOAD_TRACK ((unsigned long)0x002f20e4)
 #define PLAYER_UNLOAD_RESULT ((unsigned long)0x002f1e4c)
+#define PLAYER_REF_CURRENT_TRACK ((unsigned long)0x002f1410)
 #define MIXER_UPDATE_ON_AIR ((unsigned long)0x00057fb0)
 #define GET_PLAY_MODE ((unsigned long)0x000fd960)
 #define GET_PLAY_BPM ((unsigned long)0x000fd1fc)
 #define GET_PLAY_TEMPO ((unsigned long)0x000fd2dc)
 #define GET_MIXER_ON_AIR ((unsigned long)0x000fe34c)
 #define PLAYER_CHANNEL_OFFSET 0x26u
+#define MUSIC_ID_LOW_OFFSET 0x04u
 #define MUSIC_TITLE_OFFSET 0x28u
 
 typedef int (*get_int_fn)(unsigned int);
 typedef int (*get_mixer_on_air_fn)(unsigned int, int);
-typedef unsigned long (*player_status_fn)(void *, unsigned long);
-typedef unsigned long (*player_load_fn)(void *, const void *);
-typedef unsigned long (*player_unload_fn)(void *, unsigned long,
-                                          unsigned long, unsigned long);
-typedef unsigned long (*mixer_update_fn)(void *);
+typedef void (*player_status_fn)(void *, int);
+typedef int (*player_load_fn)(void *, const void *);
+typedef void (*player_unload_fn)(void *, int, unsigned int, unsigned int);
+typedef void *(*player_ref_current_track_fn)(void *, int);
+typedef void (*mixer_update_fn)(void *);
 
 struct installed_hook {
     unsigned long address;
@@ -131,6 +133,9 @@ static const uint8_t player_load_guard[8] = {
 };
 static const uint8_t player_unload_guard[8] = {
     0xf8, 0x40, 0x2d, 0xe9, 0x00, 0x40, 0xa0, 0xe1
+};
+static const uint8_t player_ref_current_track_guard[8] = {
+    0x3c, 0x31, 0x90, 0xe5, 0x04, 0x00, 0x93, 0xe5
 };
 static const uint8_t mixer_update_guard[8] = {
     0xf8, 0x4f, 0x2d, 0xe9, 0x04, 0x8b, 0x2d, 0xed
@@ -256,7 +261,9 @@ static void uninstall_hook(struct installed_hook *hook)
 
 static int accessor_guards_match(void)
 {
-    return memcmp((const void *)GET_PLAY_MODE, play_mode_guard, 8u) == 0 &&
+    return memcmp((const void *)PLAYER_REF_CURRENT_TRACK,
+                  player_ref_current_track_guard, 8u) == 0 &&
+           memcmp((const void *)GET_PLAY_MODE, play_mode_guard, 8u) == 0 &&
            memcmp((const void *)GET_PLAY_BPM, play_bpm_guard, 8u) == 0 &&
            memcmp((const void *)GET_PLAY_TEMPO, play_tempo_guard, 8u) == 0 &&
            memcmp((const void *)GET_MIXER_ON_AIR,
@@ -297,61 +304,66 @@ static void finish_native_write(struct native_deck *deck)
     (void)__sync_add_and_fetch(&deck->revision, 1u);
 }
 
-static unsigned long hooked_player_status(void *player, unsigned long force)
+static void hooked_player_status(void *player, int force)
 {
-    unsigned long result = original_player_status(player, force);
+    original_player_status(player, force);
     signal_deck_change(player_mask(player));
-    return result;
 }
 
-static unsigned long hooked_player_load(void *player, const void *music_info)
+static int hooked_player_load(void *player, const void *music_info)
 {
-    unsigned long result = original_player_load(player, music_info);
+    int result = original_player_load(player, music_info);
     int index = player_index(player);
-    if (index >= 0 && music_info) {
+    if (result && index >= 0 && music_info) {
         struct native_deck *deck = &native_decks[index];
         begin_native_write(deck);
-        deck->loaded = 1u;
-        memcpy(&deck->track_number, music_info, sizeof(deck->track_number));
-        memcpy(deck->title,
-               (const uint8_t *)music_info + MUSIC_TITLE_OFFSET,
-               sizeof(deck->title));
+        memcpy(&deck->track_number,
+               (const uint8_t *)music_info + MUSIC_ID_LOW_OFFSET,
+               sizeof(deck->track_number));
+        deck->loaded = deck->track_number != 0u;
+        if (deck->loaded)
+            memcpy(deck->title,
+                   (const uint8_t *)music_info + MUSIC_TITLE_OFFSET,
+                   sizeof(deck->title));
+        else
+            memset(deck->title, 0, sizeof(deck->title));
         deck->title[(sizeof(deck->title) / sizeof(deck->title[0])) - 1u] = 0;
         finish_native_write(deck);
+        signal_deck_change(1u << (unsigned int)index);
     }
-    signal_deck_change(player_mask(player));
     return result;
 }
 
-static unsigned long hooked_player_unload(void *player, unsigned long result_code,
-                                          unsigned long device,
-                                          unsigned long device_number)
+static void hooked_player_unload(void *player, int result_code,
+                                 unsigned int device,
+                                 unsigned int device_number)
 {
-    unsigned long result = original_player_unload(
-        player, result_code, device, device_number);
+    original_player_unload(player, result_code, device, device_number);
     int index = player_index(player);
-    if (index >= 0) {
+    void *current_track =
+        ((player_ref_current_track_fn)PLAYER_REF_CURRENT_TRACK)(player, 0);
+    if (index >= 0 && !current_track) {
         struct native_deck *deck = &native_decks[index];
         begin_native_write(deck);
+        int changed = deck->loaded || deck->track_number || deck->title[0];
         deck->loaded = 0u;
         deck->track_number = 0u;
         memset(deck->title, 0, sizeof(deck->title));
         finish_native_write(deck);
+        if (changed)
+            signal_deck_change(1u << (unsigned int)index);
     }
-    signal_deck_change(player_mask(player));
-    return result;
 }
 
-static unsigned long hooked_mixer_update(void *mixer)
+static void hooked_mixer_update(void *mixer)
 {
     uint8_t before_a = *((const uint8_t *)mixer + 0x64u);
     uint8_t before_b = *((const uint8_t *)mixer + 0x65u);
-    unsigned long result = original_mixer_update(mixer);
+    original_mixer_update(mixer);
     uint8_t after_a = *((const uint8_t *)mixer + 0x64u);
     uint8_t after_b = *((const uint8_t *)mixer + 0x65u);
     if (before_a != after_a || before_b != after_b)
         signal_deck_change(BOTH_DECKS);
-    return result;
 }
 
 static int read_connection(int fd)

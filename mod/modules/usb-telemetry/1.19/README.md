@@ -14,13 +14,15 @@ and accepts only the verified firmware 1.19 application with SHA-1
 ## Event flow
 
 Four guarded trampolines follow the standalone Player's status, track-load, and
-track-unload paths plus the Mixer's on-air update. The load hooks copy the
-firmware's title and track ID into a small seqlock-protected cache. Every hook
-then sets an atomic deck bit and wakes a worker through a nonblocking local
-datagram socket. The worker coalesces events, reads the native play-mode, BPM,
-tempo, and mixer-on-air accessors, and owns all USB writes. Writes use the HID
-gadget's blocking backpressure because its endpoint queues one report; this
-keeps complete snapshots intact without ever blocking an `rbp` callback.
+track-unload paths plus the Mixer's on-air update. The load hook copies the
+firmware's UTF-16 title and 32-bit content ID into a small seqlock-protected
+cache after a successful load. The unload hook waits for the player's committed
+track reference to clear. Each change sets an atomic deck bit and wakes a worker
+through a nonblocking local datagram socket. The worker coalesces events, reads
+the native play-mode, BPM, tempo, and mixer-on-air accessors, and owns all USB
+writes. The HID gadget queues one report, so the worker uses its blocking
+backpressure to keep complete snapshots intact without blocking an `rbp`
+callback.
 
 The firmware stores track strings as UTF-16LE. The worker converts them to
 UTF-8 before comparison and fragmentation on the wire.
