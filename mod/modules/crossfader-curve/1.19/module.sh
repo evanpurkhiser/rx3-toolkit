@@ -84,14 +84,14 @@ crossfader_curve_prepare()
         return 1
     }
 
-    parsed=$(awk -f "$CROSSFADER_CURVE_VALIDATOR" "$CROSSFADER_CURVE_USB_CONFIG" 2>/dev/null) || {
+    awk -f "$CROSSFADER_CURVE_VALIDATOR" "$CROSSFADER_CURVE_USB_CONFIG" \
+        > "$CROSSFADER_CURVE_NORMALIZED" 2>/dev/null || {
+        rm -f "$CROSSFADER_CURVE_NORMALIZED"
         say "Crossfader curve disabled: invalid rx3-crossfader.json"
         return 1
     }
-    set -- $parsed
-    [ "$#" = 2 ] || return 1
-    say "Crossfader curve config: target=$1 midpoint_db=$2"
-    printf '%s\n' "$parsed" > "$CROSSFADER_CURVE_NORMALIZED" || return 1
+    read -r curve_target point_count < "$CROSSFADER_CURVE_NORMALIZED" || return 1
+    say "Crossfader curve config: target=$curve_target points=$point_count"
     CROSSFADER_CURVE_CONFIGURED=1
     register_ready_file "$CROSSFADER_CURVE_READY"
     register_diagnostic_file "$CROSSFADER_CURVE_LOG"

@@ -31,12 +31,19 @@ extern void *memcpy(void *, const void *, size_t);
 #define TABLE_ENTRIES 1024u
 #define TABLE_BYTES (TABLE_ENTRIES * sizeof(uint16_t))
 #define FULL_SCALE 32767u
+#define MAX_POINTS 32u
+
+struct curve_point {
+    double position;
+    double gain;
+};
 
 struct curve_config {
     const char *target;
     unsigned long address;
     uint32_t stock_hash;
-    double midpoint_db;
+    unsigned int point_count;
+    struct curve_point points[MAX_POINTS];
 };
 
 static size_t string_length(const char *text)
@@ -76,38 +83,82 @@ static int same_string(const char *left, const char *right)
     return *left == *right;
 }
 
+static int parse_unsigned(const char *text, size_t length, size_t *cursor,
+                          unsigned int *value)
+{
+    unsigned int parsed = 0;
+    if (*cursor >= length || text[*cursor] < '0' || text[*cursor] > '9')
+        return 0;
+    while (*cursor < length && text[*cursor] >= '0' && text[*cursor] <= '9') {
+        parsed = parsed * 10u + (unsigned int)(text[*cursor] - '0');
+        (*cursor)++;
+    }
+    *value = parsed;
+    return 1;
+}
+
+static int parse_unit_decimal(const char *text, size_t length, size_t *cursor,
+                              double *value)
+{
+    unsigned int whole;
+    double fraction = 0.0;
+    double place = 0.1;
+    if (!parse_unsigned(text, length, cursor, &whole) || whole > 1u)
+        return 0;
+    if (*cursor < length && text[*cursor] == '.') {
+        (*cursor)++;
+        if (*cursor >= length || text[*cursor] < '0' || text[*cursor] > '9')
+            return 0;
+        while (*cursor < length && text[*cursor] >= '0' && text[*cursor] <= '9') {
+            fraction += (double)(text[*cursor] - '0') * place;
+            place *= 0.1;
+            (*cursor)++;
+        }
+    }
+    if (whole == 1u && fraction != 0.0)
+        return 0;
+    *value = (double)whole + fraction;
+    return 1;
+}
+
 static int parse_config_text(const char *text, size_t length,
                              struct curve_config *config)
 {
     char target[16];
     size_t cursor = 0;
     size_t target_length = 0;
-    unsigned int whole = 0;
-    double fraction = 0.0;
-    double place = 0.1;
+    unsigned int point_index;
 
     while (cursor < length && text[cursor] != ' ') {
         if (target_length + 1u >= sizeof(target)) return 0;
         target[target_length++] = text[cursor++];
     }
     target[target_length] = '\0';
-    if (cursor == length || text[cursor++] != ' ' || cursor == length ||
-        text[cursor++] != '-') return 0;
-    if (cursor == length || text[cursor] < '0' || text[cursor] > '9') return 0;
-    while (cursor < length && text[cursor] >= '0' && text[cursor] <= '9')
-        whole = whole * 10u + (unsigned int)(text[cursor++] - '0');
-    if (cursor < length && text[cursor] == '.') {
-        cursor++;
-        if (cursor == length || text[cursor] < '0' || text[cursor] > '9') return 0;
-        while (cursor < length && text[cursor] >= '0' && text[cursor] <= '9') {
-            fraction += (double)(text[cursor++] - '0') * place;
-            place *= 0.1;
-        }
+    if (cursor == length || text[cursor++] != ' ' ||
+        !parse_unsigned(text, length, &cursor, &config->point_count) ||
+        config->point_count < 2u || config->point_count > MAX_POINTS ||
+        cursor == length || text[cursor++] != '\n')
+        return 0;
+
+    for (point_index = 0; point_index < config->point_count; point_index++) {
+        struct curve_point *point = &config->points[point_index];
+        if (!parse_unit_decimal(text, length, &cursor, &point->position) ||
+            cursor == length || text[cursor++] != ' ' ||
+            !parse_unit_decimal(text, length, &cursor, &point->gain) ||
+            cursor == length || text[cursor++] != '\n')
+            return 0;
+        if (point_index > 0u &&
+            point->position <= config->points[point_index - 1u].position)
+            return 0;
+        if (point_index > 0u &&
+            point->gain < config->points[point_index - 1u].gain)
+            return 0;
     }
-    if (cursor < length && text[cursor] == '\n') cursor++;
-    if (cursor != length) return 0;
-    config->midpoint_db = -((double)whole + fraction);
-    if (config->midpoint_db < -48.0 || config->midpoint_db > -3.0103) return 0;
+    if (cursor != length || config->points[0].position != 0.0 ||
+        config->points[0].gain != 0.0 ||
+        config->points[config->point_count - 1u].position != 1.0 ||
+        config->points[config->point_count - 1u].gain != 1.0)
+        return 0;
 
     if (same_string(target, "mid")) {
         config->target = "mid";
@@ -139,96 +190,29 @@ static uint32_t table_hash(const void *bytes)
     return hash;
 }
 
-/* Small self-contained log/exp implementation; the preload cannot assume that
- * libm's public symbols are available in the vendor process. */
-static double natural_log(double value)
+static void generate_table(uint16_t table[TABLE_ENTRIES],
+                           const struct curve_config *config)
 {
-    const double ln2 = 0.6931471805599453;
-    double z;
-    double square;
-    double term;
-    double sum;
-    int scale = 0;
-    int divisor;
-
-    while (value < 0.75) {
-        value *= 2.0;
-        scale--;
-    }
-    while (value > 1.5) {
-        value *= 0.5;
-        scale++;
-    }
-    z = (value - 1.0) / (value + 1.0);
-    square = z * z;
-    term = z;
-    sum = z;
-    for (divisor = 3; divisor <= 21; divisor += 2) {
-        term *= square;
-        sum += term / (double)divisor;
-    }
-    return 2.0 * sum + (double)scale * ln2;
-}
-
-static double natural_exp(double value)
-{
-    const double ln2 = 0.6931471805599453;
-    double term = 1.0;
-    double sum = 1.0;
-    int scale = 0;
-    int index;
-
-    while (value < -0.35) {
-        value += ln2;
-        scale--;
-    }
-    while (value > 0.35) {
-        value -= ln2;
-        scale++;
-    }
-    for (index = 1; index <= 14; index++) {
-        term *= value / (double)index;
-        sum += term;
-    }
-    while (scale < 0) {
-        sum *= 0.5;
-        scale++;
-    }
-    while (scale > 0) {
-        sum *= 2.0;
-        scale--;
-    }
-    return sum;
-}
-
-static void generate_table(uint16_t table[TABLE_ENTRIES], double midpoint_db)
-{
-    const double exponent = midpoint_db / -6.020599913279624;
     unsigned int index;
-    table[0] = FULL_SCALE;
-    for (index = 1; index + 1u < TABLE_ENTRIES; index++) {
+    unsigned int segment = config->point_count - 2u;
+    for (index = 0; index < TABLE_ENTRIES; index++) {
         double position = 1.0 - (double)index / 1023.0;
-        double gain = natural_exp(exponent * natural_log(position));
+        const struct curve_point *left;
+        const struct curve_point *right;
+        double amount;
+        double gain;
+        while (segment > 0u && position < config->points[segment].position)
+            segment--;
+        left = &config->points[segment];
+        right = &config->points[segment + 1u];
+        amount = (position - left->position) /
+                 (right->position - left->position);
+        gain = left->gain + amount * (right->gain - left->gain);
         unsigned int sample = (unsigned int)(gain * (double)FULL_SCALE + 0.5);
-        if (sample > table[index - 1u])
+        if (index > 0u && sample > table[index - 1u])
             sample = table[index - 1u];
         table[index] = (uint16_t)sample;
     }
-    table[TABLE_ENTRIES - 1u] = 0u;
-}
-
-static int table_power_is_safe(const uint16_t table[TABLE_ENTRIES])
-{
-    const unsigned long long limit =
-        (unsigned long long)FULL_SCALE * FULL_SCALE + 2u * FULL_SCALE;
-    unsigned int index;
-    for (index = 0; index < TABLE_ENTRIES / 2u; index++) {
-        unsigned long long left = table[index];
-        unsigned long long right = table[TABLE_ENTRIES - 1u - index];
-        if (left * left + right * right > limit)
-            return 0;
-    }
-    return 1;
 }
 
 static int replace_table(const struct curve_config *config)
@@ -242,9 +226,7 @@ static int replace_table(const struct curve_config *config)
 
     if (table_hash((const void *)config->address) != config->stock_hash)
         return 0;
-    generate_table(generated, config->midpoint_db);
-    if (!table_power_is_safe(generated))
-        return 0;
+    generate_table(generated, config);
     if (page_size <= 0)
         page_size = 4096;
     mask = (unsigned long)page_size - 1u;
@@ -261,7 +243,7 @@ static int replace_table(const struct curve_config *config)
 
 __attribute__((constructor)) static void crossfader_curve_init(void)
 {
-    char contents[512];
+    char contents[2048];
     struct curve_config config;
     int fd = open(CONFIG_PATH, O_RDONLY);
     ssize_t count;
