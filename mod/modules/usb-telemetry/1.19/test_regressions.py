@@ -53,5 +53,21 @@ require(
     'HID_PATH "/dev/hidg0"' in SOURCE and "#define REPORT_SIZE 20u" in SOURCE,
     "the prototype uses the existing fixed-size vendor HID transport",
 )
+require(
+    "open(HID_PATH, O_WRONLY)" in SOURCE
+    and "open(HID_PATH, O_WRONLY | O_NONBLOCK)" not in SOURCE,
+    "the worker applies HID gadget backpressure instead of dropping a burst",
+)
+require(
+    "typedef void (*get_string_fn)(unsigned int, uint16_t *, unsigned int);"
+    in SOURCE
+    and "append_utf8" in SOURCE,
+    "firmware UTF-16 metadata is converted before protocol fragmentation",
+)
+require(
+    "cache->generation = generation;" in SOURCE
+    and "if (!delivered)" in SOURCE,
+    "failed snapshots remain dirty and retain their protocol generation",
+)
 
 print("USB telemetry regression guards: OK")

@@ -93,7 +93,7 @@ extern int usleep(unsigned int);
 #define GET_TEMPO ((unsigned long)0x0012561c)
 #define GET_KEY ((unsigned long)0x00125cf0)
 
-typedef void (*get_string_fn)(unsigned int, char *, unsigned int);
+typedef void (*get_string_fn)(unsigned int, uint16_t *, unsigned int);
 typedef int (*get_int_fn)(unsigned int);
 typedef unsigned long (*control_update_fn)(unsigned long, unsigned long,
                                            unsigned long);
@@ -308,15 +308,21 @@ static int write_report(uint8_t type, uint8_t deck, const uint8_t *payload)
     report[4] = PROTOCOL_VERSION;
     report[5] = type;
     report[6] = deck;
-    report[7] = sequence++;
+    report[7] = sequence;
     memcpy(report + 8u, payload, PAYLOAD_SIZE);
 
+    /* hidg exposes a one-report queue.  A nonblocking startup burst accepts
+     * the hello, then returns EAGAIN for the state and metadata behind it.
+     * This worker is the sole writer and never runs in an rbp callback, so a
+     * blocking descriptor provides the endpoint's intended backpressure. */
     if (hid_fd < 0)
-        hid_fd = open(HID_PATH, O_WRONLY | O_NONBLOCK);
+        hid_fd = open(HID_PATH, O_WRONLY);
     if (hid_fd < 0)
         return 0;
-    if (write(hid_fd, report, sizeof(report)) == (ssize_t)sizeof(report))
+    if (write(hid_fd, report, sizeof(report)) == (ssize_t)sizeof(report)) {
+        sequence++;
         return 1;
+    }
     close(hid_fd);
     hid_fd = -1;
     return 0;
@@ -343,8 +349,8 @@ static unsigned int bounded_length(const char *value, unsigned int capacity)
     return length;
 }
 
-static void send_metadata(uint8_t deck, uint8_t field, uint8_t generation,
-                          const char *value, unsigned int capacity)
+static int send_metadata(uint8_t deck, uint8_t field, uint8_t generation,
+                         const char *value, unsigned int capacity)
 {
     unsigned int length = bounded_length(value, capacity);
     unsigned int fragments = (length + 7u) / 8u;
@@ -363,16 +369,70 @@ static void send_metadata(uint8_t deck, uint8_t field, uint8_t generation,
         if (count)
             memcpy(payload + 4u, value + start, count);
         if (!write_report(MESSAGE_METADATA, deck, payload))
-            return;
+            return 0;
     }
+    return 1;
+}
+
+static unsigned int append_utf8(char *target, unsigned int written,
+                                unsigned int capacity, uint32_t codepoint)
+{
+    uint8_t bytes[4];
+    unsigned int count;
+    if (codepoint <= 0x7fu) {
+        bytes[0] = (uint8_t)codepoint;
+        count = 1u;
+    } else if (codepoint <= 0x7ffu) {
+        bytes[0] = (uint8_t)(0xc0u | (codepoint >> 6u));
+        bytes[1] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+        count = 2u;
+    } else if (codepoint <= 0xffffu) {
+        bytes[0] = (uint8_t)(0xe0u | (codepoint >> 12u));
+        bytes[1] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+        bytes[2] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+        count = 3u;
+    } else {
+        bytes[0] = (uint8_t)(0xf0u | (codepoint >> 18u));
+        bytes[1] = (uint8_t)(0x80u | ((codepoint >> 12u) & 0x3fu));
+        bytes[2] = (uint8_t)(0x80u | ((codepoint >> 6u) & 0x3fu));
+        bytes[3] = (uint8_t)(0x80u | (codepoint & 0x3fu));
+        count = 4u;
+    }
+    if (written + count >= capacity)
+        return written;
+    memcpy(target + written, bytes, count);
+    return written + count;
 }
 
 static void read_string(unsigned long address, unsigned int deck,
                         char *target, unsigned int capacity)
 {
+    uint16_t source[64];
+    unsigned int source_bytes = capacity;
+    if (source_bytes > sizeof(source))
+        source_bytes = sizeof(source);
+    memset(source, 0, sizeof(source));
     memset(target, 0, capacity);
-    ((get_string_fn)address)(deck, target, capacity);
-    target[capacity - 1u] = '\0';
+    ((get_string_fn)address)(deck, source, source_bytes);
+
+    unsigned int written = 0;
+    unsigned int units = source_bytes / sizeof(source[0]);
+    for (unsigned int index = 0; index < units && source[index]; index++) {
+        uint32_t codepoint = source[index];
+        if (codepoint >= 0xd800u && codepoint <= 0xdbffu &&
+            index + 1u < units && source[index + 1u] >= 0xdc00u &&
+            source[index + 1u] <= 0xdfffu) {
+            codepoint = 0x10000u + ((codepoint - 0xd800u) << 10u) +
+                        (source[++index] - 0xdc00u);
+        } else if (codepoint >= 0xd800u && codepoint <= 0xdfffu) {
+            codepoint = 0xfffdu;
+        }
+        unsigned int next = append_utf8(target, written, capacity, codepoint);
+        if (next == written)
+            break;
+        written = next;
+    }
+    target[written] = '\0';
 }
 
 static void sample_deck(unsigned int index, int force)
@@ -401,8 +461,9 @@ static void sample_deck(unsigned int index, int force)
         memcmp(artist, cache->artist, sizeof(artist)) != 0 ||
         memcmp(album, cache->album, sizeof(album)) != 0 ||
         memcmp(key, cache->key, sizeof(key)) != 0;
+    uint8_t generation = cache->generation;
     if (metadata_changed)
-        cache->generation++;
+        generation++;
 
     uint8_t state[PAYLOAD_SIZE];
     memset(state, 0, sizeof(state));
@@ -412,26 +473,37 @@ static void sample_deck(unsigned int index, int force)
     int tempo = ((get_int_fn)GET_TEMPO)(deck);
     state[0] = (loaded ? 0x01u : 0u) | (on_air ? 0x02u : 0u);
     state[1] = (uint8_t)play_state;
-    state[2] = cache->generation;
+    state[2] = generation;
     put_u32(state + 4u, (uint32_t)((get_int_fn)GET_TRACK_NO)(deck));
     put_u16(state + 8u, bpm < 0 ? 0u : (unsigned int)bpm);
     put_u16(state + 10u, (unsigned int)tempo);
 
+    int delivered = 1;
     if (force || !cache->valid || memcmp(state, cache->state, sizeof(state)))
-        write_report(MESSAGE_STATE, (uint8_t)deck, state);
+        delivered = write_report(MESSAGE_STATE, (uint8_t)deck, state);
+    if (metadata_changed) {
+        delivered = delivered &&
+            send_metadata((uint8_t)deck, FIELD_TITLE, generation,
+                          title, sizeof(title));
+        delivered = delivered &&
+            send_metadata((uint8_t)deck, FIELD_ARTIST, generation,
+                          artist, sizeof(artist));
+        delivered = delivered &&
+            send_metadata((uint8_t)deck, FIELD_ALBUM, generation,
+                          album, sizeof(album));
+        delivered = delivered &&
+            send_metadata((uint8_t)deck, FIELD_KEY, generation,
+                          key, sizeof(key));
+    }
+    if (!delivered)
+        return;
+
+    cache->generation = generation;
     if (metadata_changed) {
         memcpy(cache->title, title, sizeof(title));
         memcpy(cache->artist, artist, sizeof(artist));
         memcpy(cache->album, album, sizeof(album));
         memcpy(cache->key, key, sizeof(key));
-        send_metadata((uint8_t)deck, FIELD_TITLE, cache->generation,
-                      title, sizeof(title));
-        send_metadata((uint8_t)deck, FIELD_ARTIST, cache->generation,
-                      artist, sizeof(artist));
-        send_metadata((uint8_t)deck, FIELD_ALBUM, cache->generation,
-                      album, sizeof(album));
-        send_metadata((uint8_t)deck, FIELD_KEY, cache->generation,
-                      key, sizeof(key));
     }
     memcpy(cache->state, state, sizeof(state));
     cache->valid = 1u;
