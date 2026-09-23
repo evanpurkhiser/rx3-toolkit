@@ -71,13 +71,13 @@ def encode_metadata(
 def _playback_name(raw: int, loaded: bool) -> str:
     if not loaded:
         return "empty"
-    return {1: "playing", 2: "cued", 3: "paused"}.get(raw, "unknown")
+    return f"mode-{raw}"
 
 
 def _prolink_play_state(raw: int, loaded: bool) -> int:
     if not loaded:
         return 0x00
-    return {1: 0x03, 2: 0x06, 3: 0x05}.get(raw, 0x05)
+    return 0x05
 
 
 @dataclass

@@ -23,9 +23,9 @@ class TelemetryProtocolTests(unittest.TestCase):
             generation=4, track_number=123, bpm_x100=12750, tempo_raw=-80,
         )
         event = Decoder().feed(report)[0]
-        self.assertEqual(event["playback"], "playing")
+        self.assertEqual(event["playback"], "mode-1")
         self.assertEqual(event["bpm"], 127.5)
-        self.assertEqual(event["prolinkState"]["playState"], 0x03)
+        self.assertEqual(event["prolinkState"]["playState"], 0x05)
         self.assertTrue(event["prolinkState"]["isOnAir"])
 
     def test_metadata_reassembles_out_of_order(self) -> None:

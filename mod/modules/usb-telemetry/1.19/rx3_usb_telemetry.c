@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 /* Event-driven XDJ-RX3 1.19 deck telemetry transmitter.
  *
- * Two guarded hooks signal after rbp updates its control-display or metadata
- * cache. They only set an atomic bit and wake a worker. The worker owns every
- * accessor call and HID write, and also blocks on the gadget driver's sysfs
- * connect notification. No deck state is periodically polled.
+ * Guarded hooks follow the standalone player's track, status, unload, and
+ * mixer on-air updates. They only copy load metadata, set an atomic bit, and
+ * wake a worker. The worker owns every firmware accessor and HID write, and
+ * also blocks on the gadget driver's sysfs connect notification. No deck
+ * state is periodically polled.
  */
 
 typedef unsigned int size_t;
@@ -80,26 +81,24 @@ extern int usleep(unsigned int);
 #define FIELD_KEY 4u
 #define BOTH_DECKS 3u
 
-#define CONTROL_DISPLAY_UPDATED ((unsigned long)0x0012a2cc)
-#define TRACK_APP_INFO_UPDATED ((unsigned long)0x0012e358)
-#define GET_TITLE ((unsigned long)0x00125c30)
-#define GET_ARTIST ((unsigned long)0x00125c60)
-#define GET_ALBUM ((unsigned long)0x00125c90)
-#define GET_PLAY_STATE ((unsigned long)0x00125570)
-#define IS_LOADED ((unsigned long)0x001252a4)
-#define IS_ON_AIR ((unsigned long)0x001251c0)
-#define GET_TRACK_NO ((unsigned long)0x001255bc)
-#define GET_BPM_X100 ((unsigned long)0x001256c8)
-#define GET_TEMPO ((unsigned long)0x0012561c)
-#define GET_KEY ((unsigned long)0x00125cf0)
+#define PLAYER_STATUS_UPDATED ((unsigned long)0x002f1bf8)
+#define PLAYER_LOAD_TRACK ((unsigned long)0x002f20e4)
+#define PLAYER_UNLOAD_RESULT ((unsigned long)0x002f1e4c)
+#define MIXER_UPDATE_ON_AIR ((unsigned long)0x00057fb0)
+#define GET_PLAY_MODE ((unsigned long)0x000fd960)
+#define GET_PLAY_BPM ((unsigned long)0x000fd1fc)
+#define GET_PLAY_TEMPO ((unsigned long)0x000fd2dc)
+#define GET_MIXER_ON_AIR ((unsigned long)0x000fe34c)
+#define PLAYER_CHANNEL_OFFSET 0x26u
+#define MUSIC_TITLE_OFFSET 0x28u
 
-typedef void (*get_string_fn)(unsigned int, uint16_t *, unsigned int);
 typedef int (*get_int_fn)(unsigned int);
-typedef unsigned long (*control_update_fn)(unsigned long, unsigned long,
-                                           unsigned long);
-typedef unsigned long (*metadata_update_fn)(unsigned long, unsigned long,
-                                            unsigned long, unsigned long,
-                                            unsigned long, unsigned long);
+typedef int (*get_mixer_on_air_fn)(unsigned int, int);
+typedef unsigned long (*player_status_fn)(void *, unsigned long);
+typedef unsigned long (*player_load_fn)(void *, const void *);
+typedef unsigned long (*player_unload_fn)(void *, unsigned long,
+                                          unsigned long, unsigned long);
+typedef unsigned long (*mixer_update_fn)(void *);
 
 struct installed_hook {
     unsigned long address;
@@ -117,27 +116,48 @@ struct deck_cache {
     char key[32];
 };
 
-static const uint8_t control_update_guard[8] = {
-    0x03, 0x00, 0x50, 0xe3, 0xf0, 0x47, 0x2d, 0xe9
-};
-static const uint8_t metadata_update_guard[8] = {
-    0x05, 0x00, 0x51, 0xe3, 0xf0, 0x4f, 0x2d, 0xe9
-};
-static const uint8_t string_guard[8] = {
-    0x01, 0x00, 0x40, 0xe2, 0x02, 0x30, 0xa0, 0xe1
-};
-static const uint8_t state_guard[8] = {
-    0x01, 0x00, 0x40, 0xe2, 0x02, 0x00, 0x50, 0xe3
-};
-static const uint8_t tempo_guard[8] = {
-    0x38, 0x40, 0x2d, 0xe9, 0x01, 0x40, 0x40, 0xe2
+struct native_deck {
+    volatile unsigned int revision;
+    uint8_t loaded;
+    uint32_t track_number;
+    uint16_t title[128];
 };
 
-static struct installed_hook control_update_hook;
-static struct installed_hook metadata_update_hook;
-static control_update_fn original_control_update;
-static metadata_update_fn original_metadata_update;
+static const uint8_t player_status_guard[8] = {
+    0xf8, 0x40, 0x2d, 0xe9, 0x01, 0x20, 0xa0, 0xe1
+};
+static const uint8_t player_load_guard[8] = {
+    0xf0, 0x4f, 0x2d, 0xe9, 0x00, 0x40, 0xa0, 0xe1
+};
+static const uint8_t player_unload_guard[8] = {
+    0xf8, 0x40, 0x2d, 0xe9, 0x00, 0x40, 0xa0, 0xe1
+};
+static const uint8_t mixer_update_guard[8] = {
+    0xf8, 0x4f, 0x2d, 0xe9, 0x04, 0x8b, 0x2d, 0xed
+};
+static const uint8_t play_mode_guard[8] = {
+    0xf8, 0x40, 0x2d, 0xe9, 0x00, 0x60, 0xa0, 0xe1
+};
+static const uint8_t play_bpm_guard[8] = {
+    0x08, 0x40, 0x2d, 0xe9, 0x00, 0x10, 0xa0, 0xe1
+};
+static const uint8_t play_tempo_guard[8] = {
+    0x24, 0x30, 0x9f, 0xe5, 0x00, 0x10, 0xa0, 0xe1
+};
+static const uint8_t mixer_on_air_guard[8] = {
+    0x01, 0x20, 0xa0, 0xe1, 0x30, 0x10, 0x9f, 0xe5
+};
+
+static struct installed_hook player_status_hook;
+static struct installed_hook player_load_hook;
+static struct installed_hook player_unload_hook;
+static struct installed_hook mixer_update_hook;
+static player_status_fn original_player_status;
+static player_load_fn original_player_load;
+static player_unload_fn original_player_unload;
+static mixer_update_fn original_mixer_update;
 static struct deck_cache decks[2];
+static struct native_deck native_decks[2];
 static volatile unsigned int pending_decks;
 static int wake_socket[2] = {-1, -1};
 static int hid_fd = -1;
@@ -236,41 +256,101 @@ static void uninstall_hook(struct installed_hook *hook)
 
 static int accessor_guards_match(void)
 {
-    return memcmp((const void *)GET_TITLE, string_guard, 8u) == 0 &&
-           memcmp((const void *)GET_ARTIST, string_guard, 8u) == 0 &&
-           memcmp((const void *)GET_ALBUM, string_guard, 8u) == 0 &&
-           memcmp((const void *)GET_KEY, string_guard, 8u) == 0 &&
-           memcmp((const void *)GET_PLAY_STATE, state_guard, 8u) == 0 &&
-           memcmp((const void *)IS_LOADED, state_guard, 8u) == 0 &&
-           memcmp((const void *)IS_ON_AIR, state_guard, 8u) == 0 &&
-           memcmp((const void *)GET_TRACK_NO, state_guard, 8u) == 0 &&
-           memcmp((const void *)GET_BPM_X100, state_guard, 8u) == 0 &&
-           memcmp((const void *)GET_TEMPO, tempo_guard, 8u) == 0;
+    return memcmp((const void *)GET_PLAY_MODE, play_mode_guard, 8u) == 0 &&
+           memcmp((const void *)GET_PLAY_BPM, play_bpm_guard, 8u) == 0 &&
+           memcmp((const void *)GET_PLAY_TEMPO, play_tempo_guard, 8u) == 0 &&
+           memcmp((const void *)GET_MIXER_ON_AIR,
+                  mixer_on_air_guard, 8u) == 0;
 }
 
-static void signal_deck_change(void)
+static void signal_deck_change(unsigned int decks_changed)
 {
-    unsigned int previous = __sync_fetch_and_or(&pending_decks, BOTH_DECKS);
+    if (!decks_changed)
+        return;
+    unsigned int previous = __sync_fetch_and_or(&pending_decks, decks_changed);
     if (!previous && wake_socket[0] >= 0) {
         uint8_t wake = 1u;
         (void)send(wake_socket[0], &wake, sizeof(wake), MSG_DONTWAIT);
     }
 }
 
-static unsigned long hooked_control_update(unsigned long a0, unsigned long a1,
-                                           unsigned long a2)
+static int player_index(void *player)
 {
-    unsigned long result = original_control_update(a0, a1, a2);
-    signal_deck_change();
+    unsigned int channel = *((const uint8_t *)player + PLAYER_CHANNEL_OFFSET);
+    return channel >= 1u && channel <= 2u ? (int)channel - 1 : -1;
+}
+
+static unsigned int player_mask(void *player)
+{
+    int index = player_index(player);
+    return index >= 0 ? 1u << (unsigned int)index : BOTH_DECKS;
+}
+
+static void begin_native_write(struct native_deck *deck)
+{
+    (void)__sync_add_and_fetch(&deck->revision, 1u);
+}
+
+static void finish_native_write(struct native_deck *deck)
+{
+    __sync_synchronize();
+    (void)__sync_add_and_fetch(&deck->revision, 1u);
+}
+
+static unsigned long hooked_player_status(void *player, unsigned long force)
+{
+    unsigned long result = original_player_status(player, force);
+    signal_deck_change(player_mask(player));
     return result;
 }
 
-static unsigned long hooked_metadata_update(unsigned long a0, unsigned long a1,
-                                            unsigned long a2, unsigned long a3,
-                                            unsigned long a4, unsigned long a5)
+static unsigned long hooked_player_load(void *player, const void *music_info)
 {
-    unsigned long result = original_metadata_update(a0, a1, a2, a3, a4, a5);
-    signal_deck_change();
+    unsigned long result = original_player_load(player, music_info);
+    int index = player_index(player);
+    if (index >= 0 && music_info) {
+        struct native_deck *deck = &native_decks[index];
+        begin_native_write(deck);
+        deck->loaded = 1u;
+        memcpy(&deck->track_number, music_info, sizeof(deck->track_number));
+        memcpy(deck->title,
+               (const uint8_t *)music_info + MUSIC_TITLE_OFFSET,
+               sizeof(deck->title));
+        deck->title[(sizeof(deck->title) / sizeof(deck->title[0])) - 1u] = 0;
+        finish_native_write(deck);
+    }
+    signal_deck_change(player_mask(player));
+    return result;
+}
+
+static unsigned long hooked_player_unload(void *player, unsigned long result_code,
+                                          unsigned long device,
+                                          unsigned long device_number)
+{
+    unsigned long result = original_player_unload(
+        player, result_code, device, device_number);
+    int index = player_index(player);
+    if (index >= 0) {
+        struct native_deck *deck = &native_decks[index];
+        begin_native_write(deck);
+        deck->loaded = 0u;
+        deck->track_number = 0u;
+        memset(deck->title, 0, sizeof(deck->title));
+        finish_native_write(deck);
+    }
+    signal_deck_change(player_mask(player));
+    return result;
+}
+
+static unsigned long hooked_mixer_update(void *mixer)
+{
+    uint8_t before_a = *((const uint8_t *)mixer + 0x64u);
+    uint8_t before_b = *((const uint8_t *)mixer + 0x65u);
+    unsigned long result = original_mixer_update(mixer);
+    uint8_t after_a = *((const uint8_t *)mixer + 0x64u);
+    uint8_t after_b = *((const uint8_t *)mixer + 0x65u);
+    if (before_a != after_a || before_b != after_b)
+        signal_deck_change(BOTH_DECKS);
     return result;
 }
 
@@ -404,19 +484,12 @@ static unsigned int append_utf8(char *target, unsigned int written,
     return written + count;
 }
 
-static void read_string(unsigned long address, unsigned int deck,
-                        char *target, unsigned int capacity)
+static void utf16_to_utf8(const uint16_t *source, unsigned int units,
+                          char *target, unsigned int capacity)
 {
-    uint16_t source[64];
-    unsigned int source_bytes = capacity;
-    if (source_bytes > sizeof(source))
-        source_bytes = sizeof(source);
-    memset(source, 0, sizeof(source));
     memset(target, 0, capacity);
-    ((get_string_fn)address)(deck, source, source_bytes);
 
     unsigned int written = 0;
-    unsigned int units = source_bytes / sizeof(source[0]);
     for (unsigned int index = 0; index < units && source[index]; index++) {
         uint32_t codepoint = source[index];
         if (codepoint >= 0xd800u && codepoint <= 0xdbffu &&
@@ -435,6 +508,25 @@ static void read_string(unsigned long address, unsigned int deck,
     target[written] = '\0';
 }
 
+static void read_native_deck(unsigned int index, uint8_t *loaded,
+                             uint32_t *track_number, uint16_t title[128])
+{
+    struct native_deck *deck = &native_decks[index];
+    for (;;) {
+        unsigned int before = deck->revision;
+        if (before & 1u)
+            continue;
+        __sync_synchronize();
+        *loaded = deck->loaded;
+        *track_number = deck->track_number;
+        memcpy(title, deck->title, sizeof(deck->title));
+        __sync_synchronize();
+        unsigned int after = deck->revision;
+        if (before == after && !(after & 1u))
+            return;
+    }
+}
+
 static void sample_deck(unsigned int index, int force)
 {
     unsigned int deck = index + 1u;
@@ -443,18 +535,17 @@ static void sample_deck(unsigned int index, int force)
     char artist[sizeof(cache->artist)];
     char album[sizeof(cache->album)];
     char key[sizeof(cache->key)];
-    int loaded = ((get_int_fn)IS_LOADED)(deck);
+    uint16_t native_title[128];
+    uint8_t loaded;
+    uint32_t track_number;
 
+    read_native_deck(index, &loaded, &track_number, native_title);
     memset(title, 0, sizeof(title));
     memset(artist, 0, sizeof(artist));
     memset(album, 0, sizeof(album));
     memset(key, 0, sizeof(key));
-    if (loaded) {
-        read_string(GET_TITLE, deck, title, sizeof(title));
-        read_string(GET_ARTIST, deck, artist, sizeof(artist));
-        read_string(GET_ALBUM, deck, album, sizeof(album));
-        read_string(GET_KEY, deck, key, sizeof(key));
-    }
+    if (loaded)
+        utf16_to_utf8(native_title, 128u, title, sizeof(title));
 
     int metadata_changed = force || !cache->valid ||
         memcmp(title, cache->title, sizeof(title)) != 0 ||
@@ -467,15 +558,15 @@ static void sample_deck(unsigned int index, int force)
 
     uint8_t state[PAYLOAD_SIZE];
     memset(state, 0, sizeof(state));
-    int on_air = ((get_int_fn)IS_ON_AIR)(deck);
-    int play_state = ((get_int_fn)GET_PLAY_STATE)(deck);
-    int bpm = ((get_int_fn)GET_BPM_X100)(deck);
-    int tempo = ((get_int_fn)GET_TEMPO)(deck);
+    int on_air = ((get_mixer_on_air_fn)GET_MIXER_ON_AIR)(index, 0);
+    int play_state = ((get_int_fn)GET_PLAY_MODE)(index);
+    int bpm = ((get_int_fn)GET_PLAY_BPM)(index);
+    int tempo = ((get_int_fn)GET_PLAY_TEMPO)(index);
     state[0] = (loaded ? 0x01u : 0u) | (on_air ? 0x02u : 0u);
     state[1] = (uint8_t)play_state;
     state[2] = generation;
-    put_u32(state + 4u, (uint32_t)((get_int_fn)GET_TRACK_NO)(deck));
-    put_u16(state + 8u, bpm < 0 ? 0u : (unsigned int)bpm);
+    put_u32(state + 4u, track_number);
+    put_u16(state + 8u, bpm < 0 || bpm == 0xffff ? 0u : (unsigned int)bpm);
     put_u16(state + 10u, (unsigned int)tempo);
 
     int delivered = 1;
@@ -590,18 +681,32 @@ __attribute__((constructor)) static void initialize(void)
         return;
     }
 
-    original_control_update = (control_update_fn)install_hook(
-        &control_update_hook, CONTROL_DISPLAY_UPDATED,
-        control_update_guard, (void *)hooked_control_update);
-    if (!original_control_update) {
-        log_line("rejected: control-display event prologue mismatch");
+    original_player_status = (player_status_fn)install_hook(
+        &player_status_hook, PLAYER_STATUS_UPDATED,
+        player_status_guard, (void *)hooked_player_status);
+    if (!original_player_status) {
+        log_line("rejected: player status event prologue mismatch");
         goto reject;
     }
-    original_metadata_update = (metadata_update_fn)install_hook(
-        &metadata_update_hook, TRACK_APP_INFO_UPDATED,
-        metadata_update_guard, (void *)hooked_metadata_update);
-    if (!original_metadata_update) {
-        log_line("rejected: metadata event prologue mismatch");
+    original_player_load = (player_load_fn)install_hook(
+        &player_load_hook, PLAYER_LOAD_TRACK,
+        player_load_guard, (void *)hooked_player_load);
+    if (!original_player_load) {
+        log_line("rejected: player load event prologue mismatch");
+        goto reject;
+    }
+    original_player_unload = (player_unload_fn)install_hook(
+        &player_unload_hook, PLAYER_UNLOAD_RESULT,
+        player_unload_guard, (void *)hooked_player_unload);
+    if (!original_player_unload) {
+        log_line("rejected: player unload event prologue mismatch");
+        goto reject;
+    }
+    original_mixer_update = (mixer_update_fn)install_hook(
+        &mixer_update_hook, MIXER_UPDATE_ON_AIR,
+        mixer_update_guard, (void *)hooked_mixer_update);
+    if (!original_mixer_update) {
+        log_line("rejected: mixer on-air event prologue mismatch");
         goto reject;
     }
 
@@ -616,8 +721,10 @@ __attribute__((constructor)) static void initialize(void)
     return;
 
 reject:
-    uninstall_hook(&metadata_update_hook);
-    uninstall_hook(&control_update_hook);
+    uninstall_hook(&mixer_update_hook);
+    uninstall_hook(&player_unload_hook);
+    uninstall_hook(&player_load_hook);
+    uninstall_hook(&player_status_hook);
     close(wake_socket[0]);
     close(wake_socket[1]);
     wake_socket[0] = -1;

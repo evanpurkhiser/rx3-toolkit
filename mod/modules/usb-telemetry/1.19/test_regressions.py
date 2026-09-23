@@ -37,9 +37,18 @@ require(
     "telemetry makes no file-level rbp byte patch",
 )
 require(
-    "CONTROL_DISPLAY_UPDATED ((unsigned long)0x0012a2cc)" in SOURCE
-    and "TRACK_APP_INFO_UPDATED ((unsigned long)0x0012e358)" in SOURCE,
-    "event hooks remain at the statically verified entry points",
+    "PLAYER_STATUS_UPDATED ((unsigned long)0x002f1bf8)" in SOURCE
+    and "PLAYER_LOAD_TRACK ((unsigned long)0x002f20e4)" in SOURCE
+    and "PLAYER_UNLOAD_RESULT ((unsigned long)0x002f1e4c)" in SOURCE
+    and "MIXER_UPDATE_ON_AIR ((unsigned long)0x00057fb0)" in SOURCE,
+    "standalone Player and Mixer hooks remain at verified entry points",
+)
+require(
+    "GET_PLAY_MODE ((unsigned long)0x000fd960)" in SOURCE
+    and "GET_PLAY_BPM ((unsigned long)0x000fd1fc)" in SOURCE
+    and "GET_PLAY_TEMPO ((unsigned long)0x000fd2dc)" in SOURCE
+    and "GET_MIXER_ON_AIR ((unsigned long)0x000fe34c)" in SOURCE,
+    "the worker samples the standalone playback accessors",
 )
 require(
     "poll(descriptors, 2u, -1)" in SOURCE,
@@ -59,9 +68,9 @@ require(
     "the worker applies HID gadget backpressure instead of dropping a burst",
 )
 require(
-    "typedef void (*get_string_fn)(unsigned int, uint16_t *, unsigned int);"
-    in SOURCE
-    and "append_utf8" in SOURCE,
+    "MUSIC_TITLE_OFFSET 0x28u" in SOURCE
+    and "read_native_deck" in SOURCE
+    and "utf16_to_utf8" in SOURCE,
     "firmware UTF-16 metadata is converted before protocol fragmentation",
 )
 require(
