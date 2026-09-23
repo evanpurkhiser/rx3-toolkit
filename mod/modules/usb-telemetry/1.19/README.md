@@ -15,7 +15,12 @@ and accepts only the verified firmware 1.19 application with SHA-1
 Two guarded trampolines run after `rbp` updates its control-display and track
 metadata caches. They only set an atomic deck bit and wake a worker through a
 nonblocking local datagram socket. The worker coalesces events, reads the public
-`UiHid_Get*` accessors, and owns all USB writes.
+`UiHid_Get*` accessors, and owns all USB writes. Writes use the HID gadget's
+blocking backpressure because its endpoint queues one report; this keeps the
+startup snapshot intact without ever blocking an `rbp` callback.
+
+The firmware stores track strings as UTF-16LE. The worker converts them to
+UTF-8 before comparison and fragmentation on the wire.
 
 The worker also blocks on the gadget driver's sysfs connection attribute. That
 attribute calls `sysfs_notify` on USB-B connect and disconnect, so attaching a
