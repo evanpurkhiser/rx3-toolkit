@@ -6,6 +6,10 @@ H.264 with WebCodecs and play PCM with an AudioWorklet, so the relay does not
 transcode or require FFmpeg. Audio starts only after pressing **Start audio**,
 as required by mobile browser autoplay policies.
 
+The tap handler resumes Web Audio before its first asynchronous operation so
+mobile Safari retains the user activation. If iOS later suspends the context,
+the same control changes to **Resume audio** and unlocks it again.
+
 Run it from the repository root:
 
 ```bash
@@ -22,9 +26,9 @@ endpoint is `/healthz`.
 The RX3 connections stay separate: video uses TCP 7353 and audio uses TCP
 7355. The browser endpoints are `/stream` and `/audio`. A slow video client
 drops an entire stale GOP; a slow audio client drops its queued PCM and resumes
-from the newest block. Audio WebSocket frames batch up to eight RX3 blocks to
+from the newest block. Audio WebSocket frames batch up to four RX3 blocks to
 avoid sending hundreds of tiny WebSocket messages per second. The AudioWorklet
-has a bounded two-second ring and begins playback with 150 ms buffered.
+has a bounded two-second ring and begins playback with 40 ms buffered.
 The browser linearly resamples the RX3's 44.1 kHz stream when a phone fixes its
 AudioContext to a different hardware rate such as 48 kHz.
 
@@ -33,7 +37,7 @@ AudioContext to a different hardware rate such as 48 kHz.
 The current device protocols expose independent counters: microseconds from
 the video process and sample frames from the audio hook. They do not expose a
 shared start epoch. The viewer therefore treats audio as the playback clock
-and delays video presentation by the same 150 ms used for PCM preroll. This
+and delays video presentation by the same 40 ms used for PCM preroll. This
 keeps the streams close on the low-jitter USB Ethernet link, but it is arrival-
 time synchronization rather than sample-accurate synchronization. A shared
 device monotonic timestamp in both protocol headers would allow the relay to

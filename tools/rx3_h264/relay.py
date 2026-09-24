@@ -68,7 +68,7 @@ let awaitingKeyframe = true;
 const arrivals = new Map();
 let audioContext, audioNode, audioSocket, audioBufferedMs = 0;
 let sourceAudioRate = 44100, resamplePosition = 1, resampleTail = null;
-const AUDIO_PREROLL_MS = 150;
+const AUDIO_PREROLL_MS = 40;
 
 function configure() {
   if (!('VideoDecoder' in globalThis)) {
@@ -258,20 +258,70 @@ function resample(sourceLeft, sourceRight) {
   return [left.slice(0, count), right.slice(0, count)];
 }
 
+function unlockAudio() {
+  const buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioContext.destination);
+  source.start();
+  return audioContext.resume();
+}
+
+function updateAudioControls() {
+  const running = audioContext && audioContext.state === 'running';
+  audioButton.disabled = Boolean(running && audioNode);
+  audioButton.textContent = running && audioNode ? 'Audio running' : 'Resume audio';
+  if (!running) {
+    audioState.textContent = `audio ${audioContext ? audioContext.state : 'idle'} · tap Resume audio`;
+    audioState.className = 'bad';
+  }
+}
+
 audioButton.onclick = async () => {
-  if (audioContext) { await audioContext.resume(); return; }
-  audioContext = new AudioContext({latencyHint: 'interactive'});
-  const blob = new Blob([workletSource], {type: 'text/javascript'});
-  await audioContext.audioWorklet.addModule(URL.createObjectURL(blob));
-  audioNode = new AudioWorkletNode(audioContext, 'rx3-pcm-player', {outputChannelCount: [2]});
-  audioNode.connect(audioContext.destination);
-  audioNode.port.onmessage = ({data}) => {
-    audioBufferedMs = data.bufferedMs;
-    audioState.textContent = `audio ${data.primed ? 'live' : 'buffering'} · ${audioBufferedMs.toFixed(0)} ms`;
-  };
-  await audioContext.resume();
-  audioButton.disabled = true; audioButton.textContent = 'Audio enabled';
-  connectAudio();
+  audioButton.disabled = true;
+  try {
+    if (audioContext) {
+      await unlockAudio();
+      updateAudioControls();
+      return;
+    }
+
+    const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextClass) throw new Error('Web Audio unavailable');
+    audioContext = new AudioContextClass({latencyHint: 'interactive'});
+    audioContext.onstatechange = updateAudioControls;
+
+    // Invoke resume synchronously inside the tap. Mobile Safari expires its
+    // user activation if addModule is awaited first.
+    const resumed = unlockAudio();
+    await resumed;
+
+    const blob = new Blob([workletSource], {type: 'text/javascript'});
+    const moduleUrl = URL.createObjectURL(blob);
+    try {
+      await audioContext.audioWorklet.addModule(moduleUrl);
+    } finally {
+      URL.revokeObjectURL(moduleUrl);
+    }
+    audioNode = new AudioWorkletNode(audioContext, 'rx3-pcm-player', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+    });
+    audioNode.connect(audioContext.destination);
+    audioNode.port.onmessage = ({data}) => {
+      audioBufferedMs = data.bufferedMs;
+      audioState.textContent = `audio ${data.primed ? 'live' : 'buffering'} · ${audioBufferedMs.toFixed(0)} ms`;
+      audioState.className = data.primed ? 'ok' : '';
+    };
+    updateAudioControls();
+    connectAudio();
+  } catch (error) {
+    audioState.textContent = `audio error: ${error.message}`;
+    audioState.className = 'bad';
+    audioButton.disabled = false;
+    audioButton.textContent = 'Retry audio';
+  }
 };
 </script>
 </html>
@@ -457,7 +507,7 @@ class AudioSubscription:
                 self._condition.wait(timeout)
             return self._messages.popleft() if self._messages else None
 
-    def get_batch(self, timeout: float, maximum: int = 8) -> bytes | None:
+    def get_batch(self, timeout: float, maximum: int = 4) -> bytes | None:
         with self._condition:
             if not self._messages and not self.closed:
                 self._condition.wait(timeout)
