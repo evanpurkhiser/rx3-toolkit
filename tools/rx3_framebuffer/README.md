@@ -33,3 +33,12 @@ python3 -m tools.rx3_framebuffer.benchmark_codec /tmp/rx3-fb0.raw
 
 The RX3 endpoint defaults to `169.254.100.2:7351`. Override it with `--host`
 and `--port` when diagnosing another interface or a recorded producer.
+
+Capture the current reconstructed display as a dependency-free PNG:
+
+```sh
+python3 -m tools.rx3_framebuffer.snapshot /tmp/rx3-screen.png
+```
+
+The command waits for a complete framebuffer keyframe, applies another 250 ms
+of dirty rectangles by default, and writes the visible 1280×800 RGB image.

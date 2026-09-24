@@ -1,0 +1,23 @@
+{
+  "id": "remote-control",
+  "name": "Bidirectional remote control (prototype)",
+  "description": "Observes and injects guarded high-level panel controls over USB Link Ethernet.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 94,
+  "runtime_directory": "remote-control",
+  "namespace": "remote_control",
+  "requires": ["usb-link-root-shell"],
+  "conflicts": ["event-tracer", "usb-telemetry"],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "arm_hook": {
+    "source": "rx3_remote_control.c",
+    "target": "librx3_remote_control.so"
+  }
+}
