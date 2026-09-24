@@ -30,17 +30,18 @@ HOOKS = (
     "librx3_core.so",
     "librx3_core_payload.so",
     "librx3_usb_telemetry.so",
+    "librx3_event_tracer.so",
 )
 
 # Everything rbp itself is known to export. A new name here is a deliberate
 # decision -- confirm rbp really provides it before adding one.
 ALLOWED = {
     "__aeabi_uidiv", "__aeabi_uldivmod",
-    "close", "getenv", "gettimeofday", "lseek",
+    "clock_gettime", "close", "ftruncate", "getenv", "gettimeofday", "lseek",
     "memcmp", "memcpy", "memset",
     "mmap", "mprotect", "munmap", "open",
     "poll", "pthread_create", "pthread_detach",
-    "read", "recv", "send", "socketpair", "strlen", "sysconf", "usleep",
+    "read", "readlink", "recv", "send", "socketpair", "strlen", "sysconf", "usleep",
     "write",
 }
 
