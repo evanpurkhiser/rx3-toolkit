@@ -1,0 +1,15 @@
+{
+  "id": "usb-link-root-shell",
+  "name": "USB Link root shell",
+  "description": "Opens an unauthenticated root shell over the rear USB-B Link Export network. Direct, isolated cable only.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 91,
+  "runtime_directory": "usb-link-root-shell",
+  "namespace": "usb_link_root_shell",
+  "requires": [],
+  "conflicts": ["telnet", "usb-serial"],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false}
+  ]
+}

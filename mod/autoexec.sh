@@ -11,6 +11,7 @@ PATCH_TABLE=""
 PATCH_OFFSETS=""
 SUPPORTED_SHA1=""
 PREPARE_HOOKS=""
+STOPPED_HOOKS=""
 AFTER_LAUNCH_HOOKS=""
 POST_LAUNCH_HOOKS=""
 REPORT_HOOKS=""
@@ -326,6 +327,21 @@ append_diagnostics()
         say "--- diagnostic $diagnostic_file before rollback ---"
         cat "$diagnostic_file" >> "$LOG" 2>&1
     done
+}
+
+# Some resources cannot be replaced while rbp has their device nodes open.
+# This phase runs after the old process is gone and before any guarded bytes
+# are written or the replacement is launched. A failure relaunches the exact
+# process environment that was running before this insertion.
+run_hooks "$STOPPED_HOOKS" || {
+    say "STOP: a stopped hook failed; restoring the previous runtime."
+    RBP_PRELOAD=$PREVIOUS_PRELOAD
+    echo patched > /tmp/rx3-patch.state
+    launch_rbp "$RBP_RESTORE_OUTPUT"
+    wait_for_rbp "$NEW"
+    announce_media
+    say "previous rbp restarted, pid=$NEW"
+    rm -rf "$TMP"; sync; exit 1
 }
 
 write_words patched

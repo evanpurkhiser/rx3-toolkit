@@ -1,0 +1,105 @@
+--- composite.c
++++ composite-acm.c
+@@ -315,45 +315,71 @@
+ #endif
+ 
+ #ifdef CONFIG_PDJ_VENDOR_SPEC
++static int append_acm_descriptors(struct usb_composite_dev *cdev,
++		unsigned base_length, enum usb_device_speed speed)
++{
++	struct usb_configuration *config;
++	struct usb_function *function;
++	struct usb_config_descriptor *descriptor = cdev->req->buf;
++	int length = base_length;
++
++	if (list_empty(&cdev->configs))
++		return -EINVAL;
++	config = list_first_entry(&cdev->configs, struct usb_configuration, list);
++
++	list_for_each_entry(function, &config->functions, list) {
++		struct usb_descriptor_header **descriptors;
++		int status;
++
++		if (strcmp(function->name, "acm"))
++			continue;
++		descriptors = speed == USB_SPEED_HIGH
++			? function->hs_descriptors : function->descriptors;
++		status = usb_descriptor_fillbuf(cdev->req->buf + length,
++				USB_BUFSIZ - length,
++				(const struct usb_descriptor_header **)descriptors);
++		if (status < 0)
++			return status;
++		length += status;
++	}
++
++	descriptor->bNumInterfaces = config->next_interface_id;
++	descriptor->wTotalLength = cpu_to_le16(length);
++	return length;
++}
++
+ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
+ {
+-	struct usb_gadget		*gadget = cdev->gadget;
+-	u8	type = w_value >> 8;
++	struct usb_gadget *gadget = cdev->gadget;
++	enum usb_device_speed speed;
++	unsigned length;
++	u8 type = w_value >> 8;
+ 
+-#if 1
+ 	if (type == USB_DT_OTHER_SPEED_CONFIG) {
+ 		if (gadget->speed == USB_SPEED_HIGH) {
+-			memcpy(cdev->req->buf, Configuration_Other_1, sizeof(Configuration_Other_1));
+-			return sizeof(Configuration_Other_1);
+-		}
+-		else {
+-			memcpy(cdev->req->buf, Configuration_Other_2, sizeof(Configuration_Other_2));
+-			return sizeof(Configuration_Other_2);
+-		}
+-	}
+-	else {
+-		if (gadget->speed == USB_SPEED_HIGH) {
+-			memcpy(cdev->req->buf, Configuration_Hi_1, sizeof(Configuration_Hi_1));
+-			return sizeof(Configuration_Hi_1);
++			memcpy(cdev->req->buf, Configuration_Other_1,
++			       sizeof(Configuration_Other_1));
++			length = sizeof(Configuration_Other_1);
++			speed = USB_SPEED_FULL;
++		} else {
++			memcpy(cdev->req->buf, Configuration_Other_2,
++			       sizeof(Configuration_Other_2));
++			length = sizeof(Configuration_Other_2);
++			speed = USB_SPEED_HIGH;
+ 		}
+-		else {
+-			memcpy(cdev->req->buf, Configuration_Full_1, sizeof(Configuration_Full_1));
+-			return sizeof(Configuration_Full_1);
+-		}
+-	}
+-#else
+-	if (type == USB_DT_OTHER_SPEED_CONFIG) {
+-		memcpy(cdev->req->buf, 
+-			Configuration_Other_1, 
+-			sizeof(Configuration_Other_1));
+-		return sizeof(Configuration_Other_1);
++	} else if (gadget->speed == USB_SPEED_HIGH) {
++		memcpy(cdev->req->buf, Configuration_Hi_1,
++		       sizeof(Configuration_Hi_1));
++		length = sizeof(Configuration_Hi_1);
++		speed = USB_SPEED_HIGH;
+ 	} else {
+-		memcpy(cdev->req->buf, 
+-			Configuration_Hi_1, 
+-			sizeof(Configuration_Hi_1));
+-		return sizeof(Configuration_Hi_1);
++		memcpy(cdev->req->buf, Configuration_Full_1,
++		       sizeof(Configuration_Full_1));
++		length = sizeof(Configuration_Full_1);
++		speed = USB_SPEED_FULL;
+ 	}
+-#endif
++
++	return append_acm_descriptors(cdev, length, speed);
+ }
+ #else
+ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)

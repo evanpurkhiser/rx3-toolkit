@@ -1,0 +1,73 @@
+--- pmulti.c
++++ pmulti-acm.c
+@@ -59,6 +59,8 @@
+ #include "usbstring.c"
+ #include "config.c"
+ #include "epautoconf.c"
++#include "f_acm.c"
++#include "u_serial.c"
+ 
+ 
+ #if defined(CONFIG_USB_G_MULTI_PDJ_AUDIO) || defined(CONFIG_USB_G_MULTI_PDJ_MIDI)
+@@ -205,6 +207,11 @@
+ #endif
+ 
+ 
++	c->next_interface_id = USBF_IFNUM_AUDIO_STRM_IN + 1;
++	ret = acm_bind_config(c, 0);
++	if (ret < 0)
++		return ret;
++
+ 	return 0;
+ }
+ 
+@@ -232,6 +239,14 @@
+ {
+ 	struct usb_gadget *gadget = cdev->gadget;
+ 	int status;
++#ifdef CONFIG_USB_G_MULTI_PDJ_HID
++	struct list_head *tmp;
++	int funcs = 0;
++#endif
++
++	status = gserial_setup(gadget, 1);
++	if (status < 0)
++		return status;
+ 
+ #ifdef CONFIG_USB_G_MULTI_PDJ_AUDIO
+ 	// Setup has already finished by config.
+@@ -242,14 +257,13 @@
+ #endif
+ 
+ #ifdef CONFIG_USB_G_MULTI_PDJ_HID
+-	struct list_head *tmp;
+-	int funcs = 0;
+-
+ 	list_for_each(tmp, &hidg_func_list)
+ 		funcs++;
+ 
+-	if (!funcs)
+-		return -ENODEV;
++	if (!funcs) {
++		status = -ENODEV;
++		goto fail_serial;
++	}
+ 
+ 	/* set up HID */
+ 	status = ghid_setup(cdev->gadget, funcs);
+@@ -317,12 +331,15 @@
+ #ifdef CONFIG_USB_G_MULTI_PDJ_AUDIO
+ 	gaudio_cleanup();
+ #endif
++fail_serial:
++	gserial_cleanup();
+ 
+ 	return status;
+ }
+ 
+ static int __exit multi_unbind(struct usb_composite_dev *cdev)
+ {
++	gserial_cleanup();
+ #ifdef CONFIG_USB_G_MULTI_PDJ_AUDIO
+ 	gaudio_cleanup();
+ #endif

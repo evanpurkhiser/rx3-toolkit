@@ -1,0 +1,22 @@
+--- f_paudio.c
++++ f_paudio-gcc12.c
+@@ -1776,15 +1776,17 @@
+ 		struct usb_xferi __user *_xferi 
+ 			= (struct usb_xferi __user *)arg;
+ 		usb_pcm_frames_t result;
++		usb_pcm_frames_t initial_result = 0;
+ 
+-		if (put_user(0, &_xferi->result))
++		if (copy_to_user(&_xferi->result, &initial_result, sizeof(initial_result)))
+ 			return -EFAULT;
+ 		if (copy_from_user(&xferi, _xferi, sizeof(xferi)))
+ 			return -EFAULT;
+ 
+ 		result = usb_pcm_read(audio, xferi.buf, xferi.samples);
+ 
+-		__put_user(result, &_xferi->result);
++		if (copy_to_user(&_xferi->result, &result, sizeof(result)))
++			return -EFAULT;
+ 		return result < 0 ? result : 0;
+ 	}
+ 	default:

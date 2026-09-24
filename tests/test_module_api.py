@@ -18,6 +18,7 @@ PATCH_TABLE=""
 PATCH_OFFSETS=""
 SUPPORTED_SHA1=""
 PREPARE_HOOKS=""
+STOPPED_HOOKS=""
 AFTER_LAUNCH_HOOKS=""
 POST_LAUNCH_HOOKS=""
 REPORT_HOOKS=""
@@ -57,6 +58,19 @@ run_hooks "$PREPARE_HOOKS" || exit 12
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "prepared")
+
+    def test_stopped_hook_is_registered_separately(self):
+        result = run_shell(
+            r'''
+module_begin usb-serial usb_serial || exit 10
+usb_serial_swap() { printf 'swapped'; }
+register_stopped_hook usb_serial_swap || exit 11
+[ -z "$PREPARE_HOOKS" ] || exit 12
+run_hooks "$STOPPED_HOOKS" || exit 13
+'''
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "swapped")
 
     def test_module_cannot_register_a_sibling_namespace(self):
         result = run_shell(

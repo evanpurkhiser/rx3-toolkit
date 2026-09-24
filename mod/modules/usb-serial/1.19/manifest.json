@@ -1,0 +1,23 @@
+{
+  "id": "usb-serial",
+  "name": "USB serial shell (prototype)",
+  "description": "Adds a CDC ACM console to the rear USB-B composite device while preserving audio, MIDI, and HID.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 95,
+  "runtime_directory": "usb-serial",
+  "namespace": "usb_serial",
+  "requires": [],
+  "conflicts": ["usb-telemetry"],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false},
+    {"source": "g_pmulti_acm.ko", "target": "g_pmulti_acm.ko", "executable": false},
+    {"source": "console-login.sh", "target": "console-login.sh", "executable": true}
+  ],
+  "build_files": [
+    "pmulti-acm.c",
+    "pmulti-acm.patch",
+    "composite-acm.patch",
+    "f_paudio-gcc12.patch"
+  ]
+}
