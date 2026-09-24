@@ -60,13 +60,16 @@ and verify left/right polarity.
 
 ## Hardware result
 
-The first firmware 1.19 run on September 24, 2026 captured 14.93 seconds while
-the player was idle. The receiver observed 10,291 64-frame blocks at the exact
-1.4112 Mbit/s PCM payload rate, with one TCP connection, no sequence gaps, no
-timestamp gaps, and no sender-side drops. The resulting WAV was valid 44.1 kHz,
-16-bit stereo. Every sample was zero because neither deck was playing.
+The firmware 1.19 hardware run on September 24, 2026 first captured 14.93
+seconds while the player was idle. The receiver observed 10,291 64-frame
+blocks at the exact 1.4112 Mbit/s PCM payload rate, with one TCP connection,
+no sequence gaps, no timestamp gaps, and no sender-side drops. Every sample was
+zero because neither deck was playing.
 
-This validates the hook cadence, ring, conversion, framing, USB Ethernet path,
-and host WAV writer together. A capture made during playback is still needed
-to verify audible sample values, left/right order, and the recorder microphone
-setting.
+A second 56.66-second capture included 18 seconds of playback audio. It
+delivered 39,041 blocks through one connection with no sequence gaps, timestamp
+gaps, or sender-side drops. Both channels contained signal, with overall peaks
+of -13.38 dBFS left and -11.64 dBFS right. FFmpeg decoded the complete WAV
+without errors. This validates the hook, ring, conversion, framing, USB
+Ethernet path, and host WAV writer together. Channel identity and the recorder
+microphone setting still need controlled source tests.

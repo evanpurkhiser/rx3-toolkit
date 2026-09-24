@@ -247,6 +247,11 @@ first-frame counter and cumulative dropped-frame count for every block.
 An idle-device capture on September 24, 2026 produced 14.93 seconds of valid
 44.1 kHz, 16-bit stereo WAV data. The hook delivered 10,291 64-frame blocks at
 1.4112 Mbit/s with no sequence gaps, timestamp gaps, or sender drops. All
-samples were zero because neither deck was playing. This verifies continuous
-real-time capture and transport; playback content, channel order, and the
-microphone-setting behavior still require an audible capture.
+samples were zero because neither deck was playing.
+
+A second 56.66-second capture included 18 seconds of playback audio and
+delivered 39,041 blocks through one connection with no gaps or sender drops.
+Both channels contained signal, with overall peaks of -13.38 dBFS left and
+-11.64 dBFS right. FFmpeg decoded the complete WAV without errors. Channel
+identity and microphone-setting behavior still require controlled source
+tests.
