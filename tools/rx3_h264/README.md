@@ -28,7 +28,7 @@ The RX3 connections stay separate: video uses TCP 7353 and audio uses TCP
 drops an entire stale GOP; a slow audio client drops its queued PCM and resumes
 from the newest block. Audio WebSocket frames batch up to four RX3 blocks to
 avoid sending hundreds of tiny WebSocket messages per second. The AudioWorklet
-has a bounded two-second ring and begins playback with 40 ms buffered.
+has a bounded two-second ring and begins playback with 125 ms buffered.
 The browser linearly resamples the RX3's 44.1 kHz stream when a phone fixes its
 AudioContext to a different hardware rate such as 48 kHz.
 
@@ -37,11 +37,15 @@ AudioContext to a different hardware rate such as 48 kHz.
 The current device protocols expose independent counters: microseconds from
 the video process and sample frames from the audio hook. They do not expose a
 shared start epoch. The viewer therefore treats audio as the playback clock
-and delays video presentation by the same 40 ms used for PCM preroll. This
+and delays video presentation by the same 125 ms used for PCM preroll. This
 keeps the streams close on the low-jitter USB Ethernet link, but it is arrival-
 time synchronization rather than sample-accurate synchronization. A shared
 device monotonic timestamp in both protocol headers would allow the relay to
 calculate and continuously correct the exact offset.
+
+The delay is applied to encoded access units before WebCodecs receives them.
+Keeping decoded `VideoFrame` objects out of the delay queue avoids exhausting
+the small decoder-surface pool used by mobile Safari.
 
 ## Wire format
 

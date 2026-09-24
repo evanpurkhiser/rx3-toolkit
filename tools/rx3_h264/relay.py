@@ -68,7 +68,7 @@ let awaitingKeyframe = true;
 const arrivals = new Map();
 let audioContext, audioNode, audioSocket, audioBufferedMs = 0;
 let sourceAudioRate = 44100, resamplePosition = 1, resampleTail = null;
-const AUDIO_PREROLL_MS = 40;
+const AUDIO_PREROLL_MS = 125;
 
 function configure() {
   if (!('VideoDecoder' in globalThis)) {
@@ -85,12 +85,11 @@ function configure() {
       if (arrivedAt !== undefined) {
         const decodeMs = (performance.now() - arrivedAt).toFixed(0);
         latency.textContent = audioContext && audioContext.state === 'running' ?
-          `${decodeMs} ms decode · ${AUDIO_PREROLL_MS} ms A/V` : `${decodeMs} ms decode`;
+          `${decodeMs} ms video · ${AUDIO_PREROLL_MS} ms target` : `${decodeMs} ms decode`;
         arrivals.delete(frame.timestamp);
       }
-      const draw = () => { context.drawImage(frame, 0, 0, canvas.width, canvas.height); frame.close(); frames++; };
-      if (audioContext && audioContext.state === 'running') setTimeout(draw, AUDIO_PREROLL_MS);
-      else draw();
+      context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+      frame.close(); frames++;
     },
     error(error) { state.textContent = `decoder: ${error.message}`; state.className = 'bad'; }
   });
@@ -120,10 +119,17 @@ function receive(buffer) {
     data = new Uint8Array(configPrefix.length + payload.length);
     data.set(configPrefix); data.set(payload, configPrefix.length);
   }
-  if (decoder.decodeQueueSize > 12) { configure(); return; }
   awaitingKeyframe = false;
   arrivals.set(timestamp, performance.now());
-  decoder.decode(new EncodedVideoChunk({type: keyframe ? 'key' : 'delta', timestamp, data}));
+  const chunk = new EncodedVideoChunk({type: keyframe ? 'key' : 'delta', timestamp, data});
+  const targetDecoder = decoder;
+  const decode = () => {
+    if (decoder !== targetDecoder || targetDecoder.state === 'closed') return;
+    if (targetDecoder.decodeQueueSize > 12) { configure(); return; }
+    targetDecoder.decode(chunk);
+  };
+  if (audioContext && audioContext.state === 'running') setTimeout(decode, AUDIO_PREROLL_MS);
+  else decode();
 
   const now = performance.now(), elapsed = now - statsAt;
   if (elapsed >= 1000) {
