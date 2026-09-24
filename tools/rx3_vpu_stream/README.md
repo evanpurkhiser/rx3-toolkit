@@ -3,7 +3,8 @@
 `rx3-vpu-stream` keeps the i.MX6 IPU and VPU open while converting the active
 RGB565 framebuffer to 640×400 I420 and encoding H.264 Baseline at 30 fps. It
 listens for one TCP client on port 7353, reachable through the USB Link Export
-address `169.254.100.2`.
+address `169.254.100.2`. The encoder targets 3 Mbit/s with picture QP 20 and a
+one-second GOP.
 
 Build in the offline rootless Podman toolchain:
 
@@ -39,4 +40,7 @@ reconnecting receives SPS/PPS and a forced IDR before dependent frames.
 Firmware 1.19 sustained 90 frames in 2.97 seconds, or 30.33 fps. The capture
 contained one SPS/PPS configuration record, three IDRs, and 87 P-frames.
 FFmpeg decoded every frame as 640×400 YUV420 Constrained Baseline H.264 level
-3.0. The complete capture was 374,003 bytes, approximately 1.01 Mbit/s.
+3.0. That initial QP 23 test used approximately 1.01 Mbit/s. The QP 20 quality
+setting sustained 30.06 fps; Chromium measured 2.07 Mbit/s and 3 ms decode
+latency during a moving waveform. Raising only the target rate to 3 Mbit/s
+retained 30.01 fps; Chromium measured 3.13 Mbit/s and 2 ms decode latency.

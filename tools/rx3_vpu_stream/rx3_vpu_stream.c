@@ -57,6 +57,8 @@ typedef signed int s32;
 #define CAPTURE_BUFFERS 3
 #define DEFAULT_PORT 7353u
 #define FRAME_INTERVAL_NS 33333333u
+#define TARGET_BITRATE_KBPS 3000u
+#define PICTURE_QP 20
 
 #define FOURCC(a,b,c,d) ((u32)(a)|((u32)(b)<<8)|((u32)(c)<<16)|((u32)(d)<<24))
 #define IPU_PIX_FMT_RGB565 FOURCC('R','G','B','P')
@@ -224,7 +226,7 @@ static int copy_header(struct stream_state *s,int type){
 static int init_encoder(struct stream_state *s){
     EncOpenParam o;EncInitialInfo info;EncExtBufInfo ext;FrameBuffer *refs;int i;
     s->bitstream.size=STREAM_BYTES;if(IOGetPhyMem(&s->bitstream)||IOGetVirtMem(&s->bitstream)==-1)return -1;
-    zero(&o,sizeof(o));o.bitstreamBuffer=s->bitstream.phy_addr;o.bitstreamBufferSize=STREAM_BYTES;o.bitstreamFormat=STD_AVC;o.picWidth=WIDTH;o.picHeight=HEIGHT;o.frameRateInfo=30;o.bitRate=1000;o.gopSize=30;o.mapType=LINEAR_FRAME_MAP;o.rcIntraQp=-1;o.userGamma=24576;o.RcIntervalMode=1;o.MESearchRange=3;o.EncStdParam.avcParam.avc_deblkFilterOffsetAlpha=6;o.EncStdParam.avcParam.avc_chromaQpOffset=10;
+    zero(&o,sizeof(o));o.bitstreamBuffer=s->bitstream.phy_addr;o.bitstreamBufferSize=STREAM_BYTES;o.bitstreamFormat=STD_AVC;o.picWidth=WIDTH;o.picHeight=HEIGHT;o.frameRateInfo=30;o.bitRate=TARGET_BITRATE_KBPS;o.gopSize=30;o.mapType=LINEAR_FRAME_MAP;o.rcIntraQp=-1;o.userGamma=24576;o.RcIntervalMode=1;o.MESearchRange=3;o.EncStdParam.avcParam.avc_deblkFilterOffsetAlpha=6;o.EncStdParam.avcParam.avc_chromaQpOffset=10;
     if(vpu_EncOpen(&s->encoder,&o)!=RETCODE_SUCCESS)return -1;
     i=1;vpu_EncGiveCommand(s->encoder,ENC_SET_INTRA_REFRESH_MODE,&i);
     zero(&info,sizeof(info));if(vpu_EncGetInitialInfo(s->encoder,&info)!=RETCODE_SUCCESS)return -1;
@@ -243,7 +245,7 @@ static int init_encoder(struct stream_state *s){
 static int encode_frame(struct stream_state *s,int index,EncOutputInfo *out){
     EncParam p;FrameBuffer source;int loops=0;zero(&source,sizeof(source));source.bufY=s->capture[index].physical;source.bufCb=source.bufY+WIDTH*HEIGHT;source.bufCr=source.bufCb+WIDTH*HEIGHT/4;source.strideY=WIDTH;source.strideC=WIDTH/2;
     source.myIndex=s->reference_count+index;
-    zero(&p,sizeof(p));p.sourceFrame=&source;p.quantParam=23;p.forceIPicture=s->force_idr||(s->frame_number%30u)==0;p.enableAutoSkip=1;
+    zero(&p,sizeof(p));p.sourceFrame=&source;p.quantParam=PICTURE_QP;p.forceIPicture=s->force_idr||(s->frame_number%30u)==0;p.enableAutoSkip=1;
     if(vpu_EncStartOneFrame(s->encoder,&p)!=RETCODE_SUCCESS)return -1;
     while(vpu_IsBusy()){if(vpu_WaitForInt(40)<0&&++loops>10){vpu_SWReset(s->encoder,0);return -1;}}
     zero(out,sizeof(*out));s->frame_number++;s->force_idr=0;return vpu_EncGetOutputInfo(s->encoder,out)==RETCODE_SUCCESS?0:-1;

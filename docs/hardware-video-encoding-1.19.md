@@ -226,6 +226,16 @@ Mbit/s. The browser relay sustained 30.0 fps at 1.00 Mbit/s over tailnet HTTPS;
 Chromium WebCodecs reported approximately 2 ms from WebSocket receipt to canvas
 display.
 
+Increasing the target to 2 Mbit/s and lowering picture QP from 23 to 20 retained
+30.06 fps. A live Chromium sample measured 2.07 Mbit/s and 3 ms WebCodecs decode
+latency. Fine waveform edges and small text remained clearer during motion,
+with no observed frame-rate cost.
+
+A 3 Mbit/s target with the same QP 20 setting also retained 30.01 fps. Chromium
+measured 3.13 Mbit/s and 2 ms decode latency. This is the active quality setting;
+the 1 and 2 Mbit/s binaries remain available on the test USB drive for direct
+rollback comparisons.
+
 ## Browser transport
 
 MJPEG is the shortest browser path. The companion can proxy JPEG frames as a

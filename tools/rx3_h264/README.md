@@ -39,7 +39,9 @@ drops stale GOPs for slow browser clients and resumes at the next IDR frame.
 
 ## Live result
 
-The tailnet HTTPS and secure WebSocket path sustained 30.0 fps at 1.00 Mbit/s.
-Chromium's WebCodecs decoder displayed the live screen with a measured 2 ms
-receive-to-display decode delay. The JSON health endpoint reported a stable
-upstream connection with no errors during the final run.
+The initial tailnet HTTPS and secure WebSocket path sustained 30.0 fps at 1.00
+Mbit/s. After increasing the encoder target to 2 Mbit/s and lowering picture QP
+from 23 to 20, the relay sustained 30.06 fps. Chromium measured 2.07 Mbit/s and
+3 ms from WebSocket receipt to canvas display while showing a moving waveform.
+At a 3 Mbit/s encoder target, it retained 30.01 fps while Chromium measured
+3.13 Mbit/s and 2 ms decode latency.
