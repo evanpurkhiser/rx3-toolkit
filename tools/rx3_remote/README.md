@@ -24,6 +24,14 @@ python -m tools.rx3_remote.cli command deck.play_pause \
   --channel 1 --operation 2 --value 0 --float-value 0
 ```
 
+Move the browser selector one detent by supplying the same signed step in both
+value fields:
+
+```sh
+python -m tools.rx3_remote.cli command browser.rotary_selector \
+  --channel 0 --operation relative_moved --value 1 --float-value 1
+```
+
 Buttons and verified 10-bit absolute controls have shorter forms:
 
 ```sh

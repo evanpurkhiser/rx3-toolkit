@@ -35,6 +35,7 @@ struct pollfd {
 };
 
 extern int open(const char *, int, ...);
+extern ssize_t read(int, void *, size_t);
 extern ssize_t write(int, const void *, size_t);
 extern ssize_t readlink(const char *, char *, size_t);
 extern int close(int);
@@ -59,11 +60,17 @@ extern ssize_t recv(int, void *, size_t, int);
 extern int poll(struct pollfd *, unsigned long, int);
 extern int fcntl(int, int, ...);
 extern int clock_gettime(int, struct timespec *);
+extern int nanosleep(const struct timespec *, struct timespec *);
 
 #define KEY_MANAGER_SEND_KEY ((unsigned long)0x0037ad64)
 #define READY_PATH "/tmp/rx3-remote-control.ready"
 #define LOG_PATH "/tmp/rx3-remote-control.log"
+#define USB1_NOTIFY_PATH "/proc/udev_usb1"
+#define MOUNTS_PATH "/proc/mounts"
+#define USB1_MOUNT_PREFIX "/media/usb1/"
+#define REKORDBOX_EXPORT_SUFFIX "/PIONEER/rekordbox/export.pdb"
 
+#define O_RDONLY 0
 #define O_WRONLY 1
 #define O_CREAT 0100
 #define O_TRUNC 01000
@@ -100,6 +107,8 @@ extern int clock_gettime(int, struct timespec *);
 #define RECEIVE_BYTES (RX3R_MAX_PAYLOAD + 512u)
 #define PENDING_SLOTS 64u
 #define PENDING_MASK (PENDING_SLOTS - 1u)
+#define MOUNTS_BYTES 16384u
+#define MOUNT_PATH_BYTES 256u
 
 typedef void (*send_key_fn)(void *, int, int, int, long, float, long);
 
@@ -200,6 +209,170 @@ static void log_line(const char *message)
         length++;
     (void)write(fd, message, length);
     (void)close(fd);
+}
+
+static size_t string_length(const char *text)
+{
+    size_t length = 0;
+    while (text[length])
+        length++;
+    return length;
+}
+
+static void sleep_milliseconds(long milliseconds)
+{
+    struct timespec delay;
+    delay.seconds = milliseconds / 1000;
+    delay.nanoseconds = (milliseconds % 1000) * 1000000;
+    while (nanosleep(&delay, &delay))
+        ;
+}
+
+static int usb1_manager_is_listening(void)
+{
+    char fd_path[24];
+    char target[32];
+    unsigned int fd;
+    static const char prefix[] = "/proc/self/fd/";
+    size_t prefix_length = sizeof(prefix) - 1u;
+    size_t target_length = sizeof(USB1_NOTIFY_PATH) - 1u;
+
+    memcpy(fd_path, prefix, prefix_length);
+    for (fd = 0; fd < 256u; fd++) {
+        unsigned int value = fd;
+        char digits[3];
+        size_t digit_count = 0;
+        size_t index;
+        ssize_t length;
+
+        do {
+            digits[digit_count++] = (char)('0' + value % 10u);
+            value /= 10u;
+        } while (value);
+        for (index = 0; index < digit_count; index++)
+            fd_path[prefix_length + index] = digits[digit_count - index - 1u];
+        fd_path[prefix_length + digit_count] = '\0';
+
+        length = readlink(fd_path, target, sizeof(target));
+        if (length == (ssize_t)target_length &&
+            !memcmp(target, USB1_NOTIFY_PATH, target_length))
+            return 1;
+    }
+    return 0;
+}
+
+static int is_usb1_mount(const char *path, size_t length)
+{
+    size_t prefix_length = sizeof(USB1_MOUNT_PREFIX) - 1u;
+    size_t index;
+
+    if (length <= prefix_length ||
+        memcmp(path, USB1_MOUNT_PREFIX, prefix_length))
+        return 0;
+    for (index = prefix_length; index < length; index++) {
+        if (path[index] == '/')
+            return 0;
+    }
+    return 1;
+}
+
+static int has_rekordbox_export(const char *mount_path, size_t length)
+{
+    char export_path[MOUNT_PATH_BYTES];
+    size_t suffix_length = sizeof(REKORDBOX_EXPORT_SUFFIX) - 1u;
+    int fd;
+
+    if (length + suffix_length >= sizeof(export_path))
+        return 0;
+    memcpy(export_path, mount_path, length);
+    memcpy(export_path + length, REKORDBOX_EXPORT_SUFFIX,
+           suffix_length + 1u);
+    fd = open(export_path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    (void)close(fd);
+    return 1;
+}
+
+static int find_rekordbox_mount(char output[MOUNT_PATH_BYTES])
+{
+    char mounts[MOUNTS_BYTES];
+    int fd = open(MOUNTS_PATH, O_RDONLY);
+    ssize_t bytes;
+    size_t offset = 0;
+
+    if (fd < 0)
+        return 0;
+    bytes = read(fd, mounts, sizeof(mounts) - 1u);
+    (void)close(fd);
+    if (bytes <= 0)
+        return 0;
+    mounts[bytes] = '\0';
+
+    while (offset < (size_t)bytes) {
+        size_t line_end = offset;
+        size_t device_end;
+        size_t path_end;
+        size_t length;
+
+        while (line_end < (size_t)bytes && mounts[line_end] != '\n')
+            line_end++;
+        device_end = offset;
+        while (device_end < line_end && mounts[device_end] != ' ')
+            device_end++;
+        while (device_end < line_end && mounts[device_end] == ' ')
+            device_end++;
+        path_end = device_end;
+        while (path_end < line_end && mounts[path_end] != ' ')
+            path_end++;
+        length = path_end - device_end;
+        if (length < MOUNT_PATH_BYTES &&
+            is_usb1_mount(mounts + device_end, length) &&
+            has_rekordbox_export(mounts + device_end, length)) {
+            memcpy(output, mounts + device_end, length);
+            output[length] = '\0';
+            return 1;
+        }
+        offset = line_end + 1u;
+    }
+    return 0;
+}
+
+static void *usb_mount_replay_worker(void *unused)
+{
+    char mount_path[MOUNT_PATH_BYTES];
+    char notification[sizeof("mount ") + MOUNT_PATH_BYTES];
+    size_t mount_length;
+    size_t notification_length;
+    int fd;
+    ssize_t written;
+    (void)unused;
+
+    for (;;) {
+        if (usb1_manager_is_listening() && find_rekordbox_mount(mount_path))
+            break;
+        sleep_milliseconds(250);
+    }
+
+    /* Let UsbMountManager enter poll after opening the proc notification node. */
+    sleep_milliseconds(500);
+    mount_length = string_length(mount_path);
+    memcpy(notification, "mount ", sizeof("mount ") - 1u);
+    memcpy(notification + sizeof("mount ") - 1u, mount_path, mount_length);
+    notification_length = sizeof("mount ") - 1u + mount_length;
+
+    fd = open(USB1_NOTIFY_PATH, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        log_line("remote control: USB mount replay open failed\n");
+        return 0;
+    }
+    written = write(fd, notification, notification_length);
+    (void)close(fd);
+    if (written == (ssize_t)notification_length)
+        log_line("remote control: Rekordbox USB mount replayed\n");
+    else
+        log_line("remote control: USB mount replay write failed\n");
+    return 0;
 }
 
 static int running_in_rbp(void)
@@ -802,6 +975,7 @@ static void *remote_worker(void *unused)
 __attribute__((constructor)) static void initialize(void)
 {
     pthread_t worker;
+    pthread_t mount_worker;
     int buffer_bytes = EVENT_QUEUE_BYTES;
 
     if (!running_in_rbp())
@@ -829,4 +1003,9 @@ __attribute__((constructor)) static void initialize(void)
         return;
     }
     (void)pthread_detach(worker);
+    if (pthread_create(&mount_worker, 0, usb_mount_replay_worker, 0)) {
+        log_line("remote control: USB mount replay worker creation failed\n");
+        return;
+    }
+    (void)pthread_detach(mount_worker);
 }

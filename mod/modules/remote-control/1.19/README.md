@@ -37,3 +37,18 @@ tools/rx3_remote/build-device.sh /tmp/rx3-remote-build
 Use `python -m tools.rx3_remote.cli --help` for the host client. The ready and
 diagnostic files are `/tmp/rx3-remote-control.ready` and
 `/tmp/rx3-remote-control.log` on the player.
+
+Restarting `rbp` while a drive remains inserted loses the stock udev mount
+notification even though the filesystem stays mounted. A separate replay
+worker waits for the new `UsbMountManager` to open `/proc/udev_usb1`, scans the
+current `/media/usb1/*` mounts, and selects the single partition containing
+`PIONEER/rekordbox/export.pdb`. It then makes one write attempt containing
+`mount <path>` with no trailing newline. A toolkit/runtime partition is never
+announced because it does not contain the Rekordbox database.
+
+The replay uses its own detached thread. The firmware 1.19 proc-node driver can
+block an additional writer on its semaphore, so a stuck replay cannot block the
+remote-control server. Do not retry the notification, write both partitions,
+trigger the block device's uevent, or read `/proc/udev_usb1` from a shell. Those
+operations can duplicate an app-level mount, rerun toolkit startup, or consume
+the notification intended for `UsbMountManager`.

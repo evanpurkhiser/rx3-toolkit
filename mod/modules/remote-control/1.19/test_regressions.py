@@ -82,6 +82,33 @@ class RemoteControlRegressionTests(unittest.TestCase):
         self.assertIn('"usb-telemetry"', MANIFEST)
         self.assertIn('"usb-link-root-shell"', MANIFEST)
 
+    def test_usb_mount_replay_selects_only_rekordbox_partition(self):
+        replay = re.search(
+            r"static void \*usb_mount_replay_worker\(.*?\n\}", SOURCE, re.S
+        ).group(0)
+        self.assertIn("usb1_manager_is_listening()", replay)
+        self.assertIn("find_rekordbox_mount(mount_path)", replay)
+        self.assertIn('memcpy(notification, "mount "', replay)
+        self.assertEqual(replay.count("write(fd, notification"), 1)
+        self.assertIn(
+            'notification_length = sizeof("mount ") - 1u + mount_length',
+            replay,
+        )
+
+        selector = re.search(
+            r"static int find_rekordbox_mount\(.*?\n\}", SOURCE, re.S
+        ).group(0)
+        self.assertIn("is_usb1_mount", selector)
+        self.assertIn("has_rekordbox_export", selector)
+
+    def test_usb_mount_replay_cannot_block_remote_server(self):
+        initialize = SOURCE.split("static void initialize(void)", 1)[1]
+        self.assertIn("pthread_create(&worker, 0, remote_worker", initialize)
+        self.assertIn(
+            "pthread_create(&mount_worker, 0, usb_mount_replay_worker",
+            initialize,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

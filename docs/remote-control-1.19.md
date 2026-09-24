@@ -58,6 +58,35 @@ and jog pulses use relative operation 4. The tempo slider has a distinct raw
 scale and should be replayed from an observed tuple until that scale is fully
 labeled.
 
+The browser rotary selector uses the signed step in both value fields. A single
+clockwise detent is `(value=1, floatValue=1.0)` and a counterclockwise detent is
+`(value=-1, floatValue=-1.0)`. Sending only the integer step is accepted by the
+wire protocol but does not move the browser selection.
+
+## USB media recovery after an application restart
+
+The kernel keeps exported USB filesystems mounted when `rbp` restarts, while
+the replacement application loses the one-shot mount notification that built
+its media model. The remote-control preload restores that state from a detached
+worker. It waits for `UsbMountManager` to open `/proc/udev_usb1`, finds the one
+direct child of `/media/usb1` containing
+`PIONEER/rekordbox/export.pdb`, and writes one `mount <path>` record without a
+trailing newline.
+
+The firmware 1.19 procfs implementation serializes writers with an unsafe
+kernel semaphore. Concurrent writes can block and leave later shell processes
+inside `udev_usb_write`. Recovery therefore sends exactly one notification and
+never announces the toolkit partition. Do not replay every line from
+`/proc/mounts`, trigger the block-device uevent while it is already mounted, or
+read `/proc/udev_usb1`; reading consumes the next record intended for the
+application.
+
+Live validation used a two-partition SanDisk drive. The worker selected
+`/media/usb1/sda2`, logged `Rekordbox USB mount replayed`, and the restarted
+application opened both `export.pdb` and `exportExt.pdb`. Source selection then
+reported 10 tracks, and remote Browse, rotary selection, Load 1, Play, and Cue
+all completed successfully.
+
 The complete supported host catalog is
 [`tools/rx3_remote/controls.json`](../tools/rx3_remote/controls.json). It was
 derived from `ui::KeyInput::keyCodeAsText()` at `0x0037cde4`. That firmware
