@@ -1,10 +1,10 @@
 # RX3 1.19 display capture and streaming
 
 Firmware 1.19 exposes enough of the display pipeline to stream the player screen
-over the rear USB-B network connection. The lowest-risk first experiment uses
-the DirectFB diagnostic program already shipped in the system image. A sustained
-stream can then read the active framebuffer from a worker and use the player's
-presentation function only as a notification source.
+over the rear USB-B network connection. A direct read of `/dev/fb0` on a live
+unit produced the exact 1280x800 LCD image without disturbing the player. A
+sustained stream can therefore read the active framebuffer from a worker and use
+the player's presentation function only as a notification source.
 
 ## Confirmed display path
 
@@ -51,10 +51,8 @@ surface even though the firmware also contains Vivante acceleration paths.
 
 The HMI reports a separate logical coordinate space of 800x480 through
 `NS_GetScreenWidth` at `0x00277ea8` and `NS_GetScreenHeight` at `0x00277eb0`.
-`dfbdump` may therefore return an 800x480 pre-scaling primary surface while
-`/dev/fb0` always returns the 1280x800 physical scanout. The first live dump will
-show where scaling occurs. The smaller DirectFB surface would be preferable for
-streaming if it contains the complete UI.
+`/dev/fb0` returns the 1280x800 physical scanout after that logical UI has been
+scaled and composed.
 
 The main presentation function is `DS_HW_UpdateScreen` at `0x001a6528`. It
 maintains dirty rectangles in the selected 0xa4-byte layer record, blits changed
@@ -78,7 +76,22 @@ These related functions are also available:
 
 The spelling `Filp` comes from the firmware's symbol names.
 
-## Built-in screenshot path
+## Safe screenshot path
+
+The validated one-shot capture reads one physical scanout page. The 512 KiB
+`/tmp` mount is too small, so write the 2,048,000-byte result to the toolkit
+drive:
+
+```sh
+mkdir -p /media/usb1/sda1/RX3_SCREEN
+dd if=/dev/fb0 of=/media/usb1/sda1/RX3_SCREEN/fb0.raw \
+  bs=2048000 count=1
+```
+
+The result is tightly packed RGB565LE at 1280x800. This command was run against
+a live player and the decoded image matched the LCD exactly.
+
+## DirectFB diagnostic hazard
 
 The production system image contains unstripped ARM DirectFB tools:
 
@@ -89,31 +102,19 @@ The production system image contains unstripped ARM DirectFB tools:
 /usr/bin/arm-none-linux-gnueabi-dfbscreen
 ```
 
-`dfbdump` joins the active DirectFB Fusion world and can dump primary layer
-surfaces or every front buffer. Its supported options include:
+The tools expose options for dumping primary layer surfaces or every front
+buffer:
 
 ```text
 --dumplayer    dump surfaces of layer contexts
 --dumpsurface  dump the front buffer of every surface
 ```
 
-DirectFB's dump implementation writes PPM color data and PGM alpha data. This
-provides a one-shot proof before installing another capture hook.
-
-The 512 KiB `/tmp` mount cannot hold a screenshot. On the next live session,
-write the dump to the toolkit drive from the root shell:
-
-```sh
-mkdir -p /media/usb1/sda1/RX3_SCREEN
-cd /media/usb1/sda1/RX3_SCREEN
-/usr/bin/arm-none-linux-gnueabi-dfbdump --dumplayer
-ls -lh
-```
-
-The expected color file is named like
-`dfb_layer_context_0xXXXXXXXX_0000.ppm`. If more than one layer is dumped, compare
-their dimensions and contents. `--dumpsurface` is a fallback, but it may dump
-many intermediate UI surfaces and should only be run once during diagnosis.
+Do not run these tools alongside `rbp`. A live `dfbdump --dumplayer` test failed
+to join the player's Fusion world, initialized a second single-application
+DirectFB core, changed the framebuffer mode, and left the LCD white until the
+unit was rebooted. Their presence in the production image does not make them a
+safe capture interface.
 
 If the BusyBox `httpd` applet is enabled, the existing USB root-shell connection
 can expose the directory for retrieval over `169.254.100.2`:
@@ -122,8 +123,7 @@ can expose the directory for retrieval over `169.254.100.2`:
 /bin/busybox httpd -p 8080 -h /media/usb1/sda1/RX3_SCREEN
 ```
 
-Stop the server after copying the file. If `dfbdump` cannot join the application's
-Fusion world, a direct `/dev/fb0` read is the next test.
+Stop the server after copying the file.
 
 The binary also contains a JPEG encoder: `write_jpeg` at `0x00177f6c` calls
 `encodeFile` at `0x00238b6c`, which consumes RGB24 rows and uses quality 75.
@@ -133,11 +133,11 @@ the player process.
 
 ## Streaming design
 
-The first streaming module should avoid DirectFB calls and renderer hooks. A
+The first streaming module avoids DirectFB calls and renderer hooks. A
 normal-priority worker can map `/dev/fb0`, read the currently visible page using
 `FBIOGET_FSCREENINFO`, `FBIOGET_VSCREENINFO`, `line_length`, and `yoffset`, and
-send changed tiles over TCP. It captures only while one client is connected and
-defaults to 2 frames per second, with a hard limit of 10.
+send changed tiles over TCP. It scans only while one client is connected and
+caps its configurable rate at 30 frames per second.
 
 An event-driven revision can use two small components:
 
@@ -148,27 +148,27 @@ An event-driven revision can use two small components:
    preserves event-driven idling while keeping all expensive work away from the
    UI thread.
 
-The worker should cap capture at 10 frames per second initially. Multiple display
-updates between captures collapse into one frame. A slow or disconnected client
-must never backpressure the renderer; the worker drops frames and resumes from a
-keyframe.
+The worker scans at a configurable rate up to 30 frames per second. Multiple
+display updates between scans collapse into one frame. A slow or disconnected
+client never backpressures the renderer; bounded nonblocking writes disconnect
+the receiver, which reconnects for a fresh keyframe.
 
-Divide the screen into 32x32 RGB565 tiles. There are 40x25, or 1,000, tiles.
-Hashing one complete frame reads 2,048,000 bytes. The stream sends:
+The prototype divides the screen into 32x32 RGB565 tiles. There are 40x25, or
+1,000, tiles. Comparing one complete frame reads 2,048,000 bytes. The stream
+sends:
 
 ```text
 HELLO       protocol version, width, height, stride, pixel format
 KEYFRAME    frame sequence and all tiles
 DELTA       frame sequence and changed tile records
-HEARTBEAT   current sequence and counters
 ```
 
-Each tile record contains its index, payload length, and RGB565 bytes. A keyframe
-is sent on connection, periodically, and after a detected sequence gap. When
-more than roughly 60 percent of tiles change, a full-frame record is cheaper.
-Fixed bounds and network byte order keep the receiver simple. Raw tiles are
-adequate for the first test; XOR plus run-length encoding is a useful next step
-for dark UI regions and scrolling waveforms.
+Each rectangle contains its bounds, codec, payload length, and pixel data. A
+keyframe is sent on connection. Later frames encode the full-screen XOR as
+alternating skip and literal runs, then compress that stream as a raw LZ4 block.
+The firmware's zlib and a per-tile XOR codec are fallbacks. TCP preserves
+ordering; a host that detects a sequence gap waits for a fresh connection and
+keyframe. Fixed bounds and network byte order keep the receiver simple.
 
 ## Bandwidth
 
@@ -192,20 +192,64 @@ If the DirectFB primary is the complete 800x480 logical UI, each RGB565 frame is
 a much smaller stream, but the direct framebuffer worker is the safer first
 implementation.
 
+## Live prototype
+
+The `framebuffer-stream` runtime module implements the direct framebuffer design
+on firmware 1.19. It maps `/dev/fb0` read-only, compares RGB565 pixels on a
+detached worker, and listens on `169.254.100.2:7351`. The scan rate is
+configurable from 1 through 30 Hz with `RX3_FB_FPS` and defaults to 30 Hz. The
+worker blocks while no receiver is connected, and a slow receiver is
+disconnected after a bounded send deadline.
+
+The host receiver reconstructs the screen and can relay the same rectangle
+messages to web browsers over WebSocket:
+
+```sh
+python3 -m tools.rx3_framebuffer.cli --no-display --web-port 7352
+```
+
+The browser converts RGB565 tiles to RGBA and paints a canvas. This keeps image
+conversion and presentation off the player and gives each late viewer a complete
+host-generated snapshot before live deltas. It also avoids encoding and decoding
+a conventional video stream for the first proof of concept.
+
+Live validation reproduced the full performance screen through tailnet HTTPS.
+The initial raw-tile implementation delivered 1.8 to 1.9 changed frames per
+second at 6.6 to 7.0 Mbit/s. Direct protocol profiling found 480 to 513 KiB per
+moving update and matching source and arrival intervals around 545 ms. The host
+was not the bottleneck.
+
+Seven sequential live captures provided repeatable codec input:
+
+| Encoding | Typical update |
+| --- | ---: |
+| Raw 32x32 dirty tiles | 492–511 KiB |
+| Per-tile XOR skip/literal RLE | 269–276 KiB |
+| Full-frame XOR with zlib level 1 | 41–44 KiB |
+| Full-frame XOR-RLE with zlib level 1 | 26.8–28.9 KiB |
+| Full-frame XOR-RLE with the module's LZ4 encoder | 34.0–36.2 KiB |
+
+The firmware's zlib compressed one 2,048,000-byte XOR frame to 43,611 bytes in
+339 ms on the RX3, making direct deflate too expensive. RLE reduces its input,
+but a self-contained LZ4 block encoder gives similar wire size with predictable
+CPU cost and no additional runtime library. The live module therefore tries LZ4
+first, zlib second, and per-tile RLE last. A static player screen produced tiny
+updates around 0.01 to 0.02 Mbit/s after this change. A moving-waveform live rate
+still needs measurement after the player is reloaded following the module
+restart.
+
 ## Live validation order
 
-1. Use `dfbdump --dumplayer` and confirm that its PPM matches the LCD.
-2. Query framebuffer fixed and variable info, including color bitfields, stride,
+1. Query framebuffer fixed and variable info, including color bitfields, stride,
    virtual height, and current `yoffset`.
-3. Copy one visible `/dev/fb0` page and compare it with the DirectFB dump.
-4. Read full frames at 1 fps while monitoring UI responsiveness and audio.
-5. Add tile hashing and TCP transport at 5 fps, then 10 fps.
-6. Add the presentation hook so captures occur only after display updates.
-7. Measure bandwidth and dropped frames on browser, waveform, and performance
+2. Copy one visible `/dev/fb0` page and decode it as 1280x800 RGB565LE.
+3. Read full frames at 1 fps while monitoring UI responsiveness and audio.
+4. Add tile comparison and TCP transport at 5 fps, then increase toward 30 fps.
+5. Add the presentation hook so captures occur only after display updates.
+6. Measure bandwidth and dropped frames on browser, waveform, and performance
    screens before choosing compression.
 
-The remaining uncertainty is whether a concurrent `/dev/fb0` read always sees a
-tear-free completed presentation. The bundled `dfbdump` path reads the DirectFB
-surface itself, and a capture immediately after the flip provides a natural
-frame boundary. A live screenshot resolves the final question without
-persistent changes to the player.
+The remaining uncertainty is whether a concurrent `/dev/fb0` scan always sees a
+tear-free completed presentation. A later notification hook immediately after
+the flip would provide a natural frame boundary without calling into DirectFB
+from the capture worker.
