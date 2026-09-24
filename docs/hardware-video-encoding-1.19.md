@@ -109,28 +109,115 @@ Three additions are required:
    `/lib/firmware/vpu/vpu_fw_imx6q.bin`.
 3. A compatible `imx-vpu-lib` providing `libvpu` and its headers.
 
-The NXP 3.0.101 release materials list
-`imx-vpu-lib-3.0.101-4.1.1.tar.gz`, making that release line the best initial
-match for firmware 1.19. VPU firmware and libraries must come from the same BSP
-generation because their command and microcode interfaces are coupled. NXP's
+The [NXP 3.0.101 release materials](https://community.nxp.com/pwmxy87654/attachments/pwmxy87654/imx-processors/80811/1/MX_6_Linux_3.0.101_4.1.1_Patch_Release_Notes.pdf)
+list
+`firmware-imx-3.0.101-4.1.1.tar.gz` and
+`imx-vpu-lib-3.0.101-4.1.1.tar.gz`. The latter provides `libvpu` 5.4.23.
+These are the matching initial userspace components for firmware 1.19. VPU
+firmware and libraries must come from the same BSP generation because their
+command and microcode interfaces are coupled. `libvpu` accepts `VPU_FW_PATH` as
+the directory containing `vpu_fw_imx6q.bin`; its conventional installed path is
+`/lib/firmware/vpu/vpu_fw_imx6q.bin`. NXP's
 [i.MX6 Linux reference manual](https://community.nxp.com/pwmxy87654/attachments/pwmxy87654/imx-processors/87230/3/Linux_6DQ_RM_L3.0.35_1.1.0.pdf)
 describes the vendor driver, `imx-vpu-lib`, and firmware arrangement.
 
-The vendor kernel driver cannot be compiled unchanged as a loadable module in
-this RX3 kernel. Its initialization calls `memblock_analyze()` and
+The vendor kernel driver calls `memblock_analyze()` and
 `memblock_end_of_DRAM_with_reserved()`, neither of which is exported to modules;
 the kernel also has `CONFIG_MODVERSIONS=y`, so every remaining kernel symbol
 must match its recorded CRC. The two unavailable calls only establish the upper
 physical-memory bound used by
-`VPU_IOC_PHYMEM_CHECK`. A module-safe version should accept the validated RAM
-limit as a read-only module parameter or replace the check with equivalent
-resource validation. Removing the bound entirely would make a bad physical
-address capable of hanging the system.
+`VPU_IOC_PHYMEM_CHECK`. The module build in
+[`tools/rx3_vpu_kernel`](../tools/rx3_vpu_kernel/) replaces those calls with a
+required, read-only `dram_top` parameter. The live RX3 memory map ends at
+`0x4fffffff`, so the initial load contract is:
+
+```sh
+insmod ./mxc_vpu.ko dram_top=0x4fffffff
+```
+
+The parameter preserves the driver's rejection of physical addresses above
+RAM. Loading without it returns `EINVAL`. A wrong upper bound can allow an
+invalid DMA address to reach the hardware, so the value must be checked against
+`/proc/iomem` before every load on a new firmware or hardware revision.
 
 The platform device already carries the VPU register, IPI IRQ, JPEG IRQ,
-reset, IRAM, clock, and regulator data. Loading the corrected module should bind
-to that existing device and create `/dev/mxc_vpu`; a custom kernel image is not
-required for the first experiment.
+reset, IRAM, clock, and regulator data. The corrected module binds to that
+existing device and creates `/dev/mxc_vpu`; a custom kernel image is not
+required.
+
+## Reproduced module build
+
+The corrected driver builds as an external module against the production 1.19
+kernel tree and its recovered `Module.symvers`. The build ran offline inside
+`localhost/rx3-reverse:latest` with an ARM EABI GCC 12.2 toolchain staged from
+the existing USB-serial builder image. `modpost` reported no unresolved
+symbols. The checked-in artifact has these properties:
+
+```text
+file     ELF 32-bit LSB relocatable, ARM EABI5
+size     19,796 bytes
+SHA-256  096d0ccff06259ddc2b9594bed987fd7453d11edffe12a279cdb86531f96fbd3
+vermagic 3.0.101-2790-gc248ed7-svn3098 SMP preempt mod_unload modversions ARMv7
+depends  none
+param    dram_top: highest valid RX3 physical RAM address (ulong)
+```
+
+The full build command is captured by
+[`tools/rx3_vpu_kernel/build-module.sh`](../tools/rx3_vpu_kernel/build-module.sh).
+It verifies the exact kernel release and `CONFIG_MODVERSIONS=y`, applies the
+small source patch inside the network-isolated reverse-engineering container,
+and performs the external-module build so `modpost` imports the production
+symbol CRCs.
+
+The registered platform resources expected during probe are:
+
+| Resource | Firmware 1.19 value |
+| --- | --- |
+| Platform name | `mxc_vpu` |
+| Register range | `0x02040000-0x02043fff` |
+| JPEG IRQ | 35 |
+| IPI IRQ | 44 |
+| Internal RAM | `0x21000` bytes |
+| Clock | `vpu_clk` |
+| Regulator | `cpu_vddvpu` |
+| Device node after probe | `/dev/mxc_vpu` |
+
+The first hardware load on firmware 1.19 succeeded. The module created character
+device `/dev/mxc_vpu` with major 246, claimed JPEG IRQ 35 and codec IRQ 44, and
+logged `VPU initialized`. Unloading removed the device and released both IRQs.
+An earlier GCC 12 build failed safely before probe because it contained an
+unresolved `_GLOBAL_OFFSET_TABLE_` reference. The external Makefile now forces
+non-PIC and non-PIE code, and offline ELF inspection verifies that the reference
+is absent.
+
+The vendor probe has weak cleanup on some failure paths, and userspace calls
+program physical DMA addresses. Every load must therefore reconfirm the highest
+inclusive System RAM address in `/proc/iomem`, supply it as `dram_top`, and
+inspect `dmesg` before opening the device. The module, version probe, private
+H.264 frame, and IPU framebuffer conversion have all passed as separate bounded
+tests. A persistent streamer is the remaining integration boundary.
+
+## Live hardware validation
+
+The IPU, VPU driver, firmware, library, and encoder have now been exercised on
+firmware 1.19 in separate bounded tests:
+
+| Stage | Result |
+| --- | --- |
+| IPU RGB565 to 640x400 I420 | 50 ms including process startup and `/tmp` write |
+| VPU initialization | firmware 3.1.1 build 46056, library 5.4.23, 90 ms |
+| One-frame H.264 encode | 40.12 encoder fps, 30.78 aggregate fps |
+| H.264 output | 12,451 bytes, Baseline level 3.0, 640x400 IDR |
+
+The IPU frame matched the simultaneous RGB565 stream in crop, geometry, and
+color. The H.264 stream contains one SPS, one PPS, and one IDR NAL unit. The
+codec IRQ count advanced once. Each test released its userspace allocations,
+and the VPU module unloaded cleanly afterward.
+
+The aggregate result crosses the 30 fps target for a single frame even with
+file input and output. A continuous streamer should retain two or three I420
+buffers, keep the VPU session open, and send encoded access units directly to
+the companion instead of writing either intermediate or output frames to disk.
 
 ## Browser transport
 
@@ -152,21 +239,22 @@ can also carry cheaply compressed dirty rectangles while the VPU path is being
 brought up, but it does not provide the bandwidth efficiency or browser decode
 offload of H.264.
 
-## Recommended phases
+## Continuous-stream implementation
 
-1. Add inexpensive compression to the existing dirty-rectangle protocol and
-   record delivered frame rate, payload rate, and RX3 CPU use.
-2. Exercise `/dev/mxc_ipu` with a read-only framebuffer input and a private
-   640x400 YUV420 DMA output buffer. Verify scaling, colors, active-page
-   selection, and latency without involving the VPU.
-3. Feed the IPU output to the installed `tjCompressFromYUV` implementation and
-   serve MJPEG. This validates the complete capture and browser path before
-   introducing a kernel module.
-4. Build and load the corrected `mxc_vpu.ko`, then validate `/dev/mxc_vpu` with
-   one-frame MJPEG encoding using matching microcode and `libvpu`.
-5. Switch the VPU to H.264 Baseline and add companion-side fragmented MP4 or
-   WebRTC packaging. Measure end-to-end latency, encoder bitrate, dropped
-   frames, audio stability, and UI responsiveness under moving waveforms.
+The production loop should keep the IPU and VPU descriptors, VPU encoder, and
+bitstream buffer open for the lifetime of a client session. Two or three I420
+DMA buffers form an ownership ring: one is available to the IPU, one may be
+owned by the VPU, and one may wait for either stage. A timer selects a new
+framebuffer page at 30 Hz and drops that capture when no IPU buffer is free.
+The encoder emits an IDR and SPS/PPS when a client connects, followed by
+P-frames with a roughly one-second GOP. A bounded socket queue similarly drops
+complete access units when the USB network cannot keep up.
+
+The companion should first remux Annex-B access units into fragmented MP4 for
+Media Source Extensions. WebRTC is a later transport option when interactive
+latency and congestion control justify the added signaling. Validation should
+measure sustained delivered frame rate, bitrate, latency, dropped frames, RX3
+CPU use, audio stability, and UI responsiveness under moving waveforms.
 
 The RX3 boots with `isolcpus=3`. Its IRQ policy assigns SDMA to CPU 3, USB and
 Ethernet to CPU 2, and IPU/Vivante interrupts to CPU 1. Software encoder and
