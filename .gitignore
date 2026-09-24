@@ -9,6 +9,7 @@
 *.o
 *.a
 *.rx3stem
+/mod/modules/rekordbox-capture/*/rx3-eth0-capture
 
 # Private laboratory material
 /local/
