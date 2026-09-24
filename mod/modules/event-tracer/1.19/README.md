@@ -9,11 +9,20 @@ with:
 tail -n 0 -f /dev/shm/rx3-events.jsonl
 ```
 
-The tracer reports track load and unload, title, artist, album, key, raw play
-mode, playback position, cue and loop state, jog touch and scratch state, BPM,
-tempo, master-tempo state, slip state, and mixer on-air state. The firmware's
-play-mode and tempo values are deliberately emitted without guessed semantic
-labels so a hardware capture can establish their exact meaning.
+The tracer reports track load and unload, content identity, raw play mode,
+playback position, cue and loop state, jog touch and scratch state, BPM, tempo,
+master-tempo state, slip state, and mixer on-air state. The schema includes
+title, artist, album, and key, but the local-USB metadata source still needs to
+be connected. The firmware's play-mode and tempo values are deliberately
+emitted without guessed semantic labels so a hardware capture can establish
+their exact meaning.
+
+Every input passed through the firmware's central key manager also produces a
+`control` record. It preserves the raw key code, operation, channel, integer
+value, float bit pattern, and auxiliary value. This covers the panel controls,
+including faders, knobs, transport keys, pads, jog wheels, browse controls, and
+encoders, while allowing a one-control-at-a-time capture to establish exact
+value ranges and operation meanings.
 
 The `action` records come directly from guarded `DjEngineIF` entry points for
 play, pause, tempo slider, jog speed/touch/pulse, back cue, loop in/out/exit,
@@ -47,3 +56,6 @@ The module is isolated from the performance core and conflicts with
 hooks. It accepts only the verified firmware 1.19 `rbp` SHA-1
 `cf309238491e73cdbdc1f08a09f7a3177e079068`. All changes live in RAM and vanish
 when the RX3 is powered off.
+
+See [the firmware 1.19 event tracer reference](../../../../docs/event-tracer-1.19.md)
+for hook interfaces, key codes, live hardware results, and current limits.

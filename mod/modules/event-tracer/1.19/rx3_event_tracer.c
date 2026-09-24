@@ -95,6 +95,7 @@ extern int clock_gettime(int, struct timespec *);
 #define ACTION_HOT_CUE_RECORD 17u
 #define ACTION_HOT_CUE_GATE 18u
 #define ACTION_LINK_STATE 19u
+#define ACTION_CONTROL 20u
 
 #define PLAYER_STATUS_UPDATED ((unsigned long)0x002f1bf8)
 #define PLAYER_LOAD_TRACK ((unsigned long)0x002f20e4)
@@ -149,6 +150,7 @@ extern int clock_gettime(int, struct timespec *);
 #define ENGINE_AUTO_LOOP ((unsigned long)0x00048f40)
 #define ENGINE_BEAT_JUMP ((unsigned long)0x00049ae0)
 #define NETWORK_CHANGE_PLAY_STATUS ((unsigned long)0x0038f278)
+#define KEY_MANAGER_SEND_KEY ((unsigned long)0x0037ad64)
 
 #define PLAYER_CHANNEL_OFFSET 0x26u
 #define MUSIC_ID_LOW_OFFSET 0x04u
@@ -169,6 +171,8 @@ typedef int (*engine_two_bool_fn)(void *, unsigned int, int, int);
 typedef int (*engine_simple_fn)(void *, unsigned int);
 typedef int (*engine_auto_loop_fn)(void *, unsigned int, const void *, int, int, int);
 typedef void (*network_status_fn)(void *, const void *);
+typedef void (*key_manager_send_key_fn)(void *, int, int, int,
+                                        long, float, long);
 
 struct installed_hook {
     unsigned long address;
@@ -268,6 +272,9 @@ static const uint8_t engine_auto_loop_guard[8] = {
 static const uint8_t network_status_guard[8] = {
     0xf0, 0x45, 0x2d, 0xe9, 0x28, 0x00, 0xa0, 0xe3
 };
+static const uint8_t key_manager_send_key_guard[8] = {
+    0xf0, 0x4f, 0x2d, 0xe9, 0x0c, 0xd0, 0x4d, 0xe2
+};
 
 static const struct code_guard accessor_guards[] = {
     {PLAYER_REF_CURRENT_TRACK, {0x3c, 0x31, 0x90, 0xe5, 0x04, 0x00, 0x93, 0xe5}},
@@ -322,6 +329,7 @@ static struct installed_hook engine_hot_cue_play_hook;
 static struct installed_hook engine_hot_cue_record_hook;
 static struct installed_hook engine_hot_cue_gate_hook;
 static struct installed_hook network_status_hook;
+static struct installed_hook key_manager_send_key_hook;
 static player_status_fn original_player_status;
 static player_load_fn original_player_load;
 static player_unload_fn original_player_unload;
@@ -344,6 +352,7 @@ static engine_four_arg_fn original_engine_hot_cue_play;
 static engine_value_fn original_engine_hot_cue_record;
 static engine_value_fn original_engine_hot_cue_gate;
 static network_status_fn original_network_status;
+static key_manager_send_key_fn original_key_manager_send_key;
 static struct native_deck native_decks[2];
 static struct deck_state previous_states[2];
 static volatile unsigned int pending_reasons[2];
@@ -506,6 +515,26 @@ static int float_bits(float value)
     int bits;
     memcpy(&bits, &value, sizeof(bits));
     return bits;
+}
+
+static void hooked_key_manager_send_key(void *manager, int key_code,
+                                        int operation, int channel,
+                                        long value, float float_value,
+                                        long auxiliary)
+{
+    struct action_record action;
+    memset(&action, 0, sizeof(action));
+    action.kind = ACTION_CONTROL;
+    action.value0 = key_code;
+    action.value1 = operation;
+    action.value2 = channel;
+    action.value3 = (int)value;
+    action.unsigned0 = (uint32_t)float_bits(float_value);
+    action.unsigned1 = (uint32_t)auxiliary;
+    queue_action(&action);
+
+    original_key_manager_send_key(manager, key_code, operation, channel,
+                                  value, float_value, auxiliary);
 }
 
 static void signal_deck(unsigned int index, unsigned int reason)
@@ -1261,6 +1290,25 @@ static void emit_link_state(const struct action_record *action)
     write_json(&json);
 }
 
+static void emit_control(const struct action_record *action)
+{
+    struct json_buffer json;
+    json_prefix(&json, "control", 0u, 0u);
+    json_text(&json, ",\"keyCode\":");
+    json_signed(&json, action->value0);
+    json_text(&json, ",\"operation\":");
+    json_signed(&json, action->value1);
+    json_text(&json, ",\"channel\":");
+    json_signed(&json, action->value2);
+    json_text(&json, ",\"valueRaw\":");
+    json_signed(&json, action->value3);
+    json_text(&json, ",\"floatRawBits\":");
+    json_unsigned(&json, action->unsigned0);
+    json_text(&json, ",\"auxRaw\":");
+    json_signed(&json, (int)action->unsigned1);
+    write_json(&json);
+}
+
 static void emit_dropped(unsigned int count)
 {
     struct json_buffer json;
@@ -1276,6 +1324,10 @@ static void process_action(const struct action_record *action)
         return;
     if (action->kind == ACTION_LINK_STATE) {
         emit_link_state(action);
+        return;
+    }
+    if (action->kind == ACTION_CONTROL) {
+        emit_control(action);
         return;
     }
     emit_action(action);
@@ -1453,6 +1505,11 @@ __attribute__((constructor)) static void initialize(void)
         network_status_guard, (void *)hooked_network_status);
     if (!original_network_status)
         goto action_reject;
+    original_key_manager_send_key = (key_manager_send_key_fn)install_hook(
+        &key_manager_send_key_hook, KEY_MANAGER_SEND_KEY,
+        key_manager_send_key_guard, (void *)hooked_key_manager_send_key);
+    if (!original_key_manager_send_key)
+        goto action_reject;
 
     pthread_t thread;
     if (pthread_create(&thread, 0, event_loop, 0)) {
@@ -1467,6 +1524,7 @@ action_reject:
     log_line("rejected: direct action event prologue mismatch");
 
 reject:
+    uninstall_hook(&key_manager_send_key_hook);
     uninstall_hook(&network_status_hook);
     uninstall_hook(&engine_hot_cue_gate_hook);
     uninstall_hook(&engine_hot_cue_record_hook);

@@ -38,9 +38,15 @@ for address in (
     "0x00046de4", "0x0004736c", "0x00047914", "0x000479cc",
     "0x00047b3c", "0x00047bf4", "0x000480c4", "0x00048184",
     "0x000488c8", "0x00048980", "0x00048c68", "0x00048f40",
-    "0x00049ae0", "0x0038f278",
+    "0x00049ae0", "0x0038f278", "0x0037ad64",
 ):
     require(address in SOURCE, f"verified hook {address} is missing")
+
+require(
+    "static const uint8_t key_manager_send_key_guard[8]" in SOURCE
+    and "0xf0, 0x4f, 0x2d, 0xe9, 0x0c, 0xd0, 0x4d, 0xe2" in SOURCE,
+    "the verified central control-dispatch prologue must stay pinned",
+)
 
 for accessor in (
     "GET_TITLE_STRING", "GET_ARTIST_STRING", "GET_ALBUM_STRING",
@@ -55,6 +61,27 @@ require(
     "SOCK_DGRAM | SOCK_NONBLOCK" in SOURCE and "MSG_DONTWAIT" in SOURCE,
     "callbacks must use a nonblocking datagram queue",
 )
+control_callback = SOURCE[
+    SOURCE.index("static void hooked_key_manager_send_key"):
+    SOURCE.index("static void signal_deck")
+]
+for field in (
+    "key_code", "operation", "channel", "value", "float_value", "auxiliary",
+):
+    require(field in control_callback, f"raw control field {field} is missing")
+require(
+    "queue_action(&action);" in control_callback
+    and "write_json" not in control_callback
+    and "open(" not in control_callback,
+    "the control callback must only enqueue its fixed-size raw record",
+)
+for json_field in (
+    "keyCode", "operation", "channel", "valueRaw", "floatRawBits", "auxRaw",
+):
+    require(
+        f'\\"{json_field}\\"' in SOURCE,
+        f"control JSON field {json_field} is missing",
+    )
 require(
     "dropped_actions" in SOURCE and 'json_prefix(&json, "dropped"' in SOURCE,
     "queue pressure must be observable",
