@@ -214,10 +214,17 @@ color. The H.264 stream contains one SPS, one PPS, and one IDR NAL unit. The
 codec IRQ count advanced once. Each test released its userspace allocations,
 and the VPU module unloaded cleanly afterward.
 
-The aggregate result crosses the 30 fps target for a single frame even with
-file input and output. A continuous streamer should retain two or three I420
-buffers, keep the VPU session open, and send encoded access units directly to
-the companion instead of writing either intermediate or output frames to disk.
+The aggregate one-frame result crosses the 30 fps target even with file input
+and output. The continuous streamer now retains three I420 buffers, keeps the
+VPU session open, and sends encoded access units directly to the companion
+without writing intermediate or output frames to disk.
+
+The live pipeline sustained 90 frames in 2.97 seconds, or 30.33 fps. FFmpeg
+decoded all 90 frames as 640x400 YUV420 Constrained Baseline H.264 level 3.0.
+The capture contained SPS, PPS, three IDRs, and 87 P-frames and averaged 1.01
+Mbit/s. The browser relay sustained 30.0 fps at 1.00 Mbit/s over tailnet HTTPS;
+Chromium WebCodecs reported approximately 2 ms from WebSocket receipt to canvas
+display.
 
 ## Browser transport
 
