@@ -716,8 +716,18 @@ static int open_listener(unsigned int port)
     return listener;
 }
 
+static void capture_snapshot(uint8_t *snapshot, const uint8_t *framebuffer,
+                             uint32_t source_stride, uint32_t width,
+                             uint32_t height)
+{
+    size_t row_bytes = (size_t)width * 2u;
+    for (uint32_t row = 0; row < height; row++)
+        memcpy(snapshot + (size_t)row * row_bytes,
+               framebuffer + (size_t)row * source_stride, row_bytes);
+}
+
 static void stream_client(int client, const uint8_t *framebuffer,
-                          uint8_t *shadow, uint8_t *message,
+                          uint8_t *snapshot, uint8_t *shadow, uint8_t *message,
                           uint32_t message_capacity, uint8_t *scratch,
                           uint32_t *hash_table,
                           const struct fb_var_screeninfo *variable,
@@ -726,8 +736,10 @@ static void stream_client(int client, const uint8_t *framebuffer,
                           unsigned int frames_per_second)
 {
     uint32_t bytes_per_pixel = (variable->bits_per_pixel + 7u) / 8u;
+    uint32_t packed_stride = variable->xres * bytes_per_pixel;
+    uint32_t packed_length = packed_stride * variable->yres;
     const uint8_t *visible = framebuffer + visible_offset;
-    memset(shadow, 0, fixed->smem_len);
+    memset(shadow, 0, packed_length);
     if (!send_hello(client, variable, fixed))
         return;
 
@@ -736,24 +748,29 @@ static void stream_client(int client, const uint8_t *framebuffer,
     delay.tv_nsec = (long)(1000000000u / frames_per_second);
     int keyframe = 1;
     for (;;) {
+        /* The snapshot is the consistency boundary for one wire update. Every
+         * encoder fallback and the shadow advance must observe these exact
+         * bytes even when rbp redraws /dev/fb0 during compression. */
+        capture_snapshot(snapshot, visible, fixed->line_length,
+                         variable->xres, variable->yres);
         int result;
         if (!keyframe) {
             result = send_lz4_frame(
-                client, visible, shadow + visible_offset,
+                client, snapshot, shadow,
                 message, message_capacity, scratch, hash_table,
-                fixed->line_length, variable->xres, variable->yres);
+                packed_stride, variable->xres, variable->yres);
             if (result < 0)
                 result = send_zlib_frame(
-                client, visible, shadow + visible_offset,
+                client, snapshot, shadow,
                 message, message_capacity, scratch,
-                fixed->line_length, variable->xres, variable->yres);
+                packed_stride, variable->xres, variable->yres);
         } else {
             result = -1;
         }
         if (result < 0)
-            result = send_frame(client, visible, shadow + visible_offset,
+            result = send_frame(client, snapshot, shadow,
                                 message, message_capacity,
-                                fixed->line_length, bytes_per_pixel,
+                                packed_stride, bytes_per_pixel,
                                 variable->xres, variable->yres, keyframe);
         if (!result)
             return;
@@ -811,9 +828,17 @@ static void *stream_worker(void *unused)
         log_line("rejected: framebuffer mmap failed");
         return 0;
     }
-    uint8_t *shadow = malloc(fixed.smem_len);
+    uint32_t packed_length = variable.xres * variable.yres * bytes_per_pixel;
+    uint8_t *shadow = malloc(packed_length);
     if (!shadow) {
         log_line("rejected: framebuffer shadow allocation failed");
+        munmap(framebuffer, fixed.smem_len);
+        return 0;
+    }
+    uint8_t *snapshot = malloc(packed_length);
+    if (!snapshot) {
+        log_line("rejected: framebuffer snapshot allocation failed");
+        free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
     }
@@ -824,6 +849,7 @@ static void *stream_worker(void *unused)
         variable.xres * variable.yres * bytes_per_pixel;
     if (message_capacity > MAX_MESSAGE_SIZE) {
         log_line("rejected: framebuffer frame exceeds protocol limit");
+        free(snapshot);
         free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
@@ -831,6 +857,7 @@ static void *stream_worker(void *unused)
     uint8_t *message = malloc(message_capacity);
     if (!message) {
         log_line("rejected: framebuffer message allocation failed");
+        free(snapshot);
         free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
@@ -840,6 +867,7 @@ static void *stream_worker(void *unused)
     if (!scratch) {
         log_line("rejected: framebuffer codec allocation failed");
         free(message);
+        free(snapshot);
         free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
@@ -849,6 +877,7 @@ static void *stream_worker(void *unused)
         log_line("rejected: framebuffer LZ4 allocation failed");
         free(scratch);
         free(message);
+        free(snapshot);
         free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
@@ -860,6 +889,7 @@ static void *stream_worker(void *unused)
         free(hash_table);
         free(scratch);
         free(message);
+        free(snapshot);
         free(shadow);
         munmap(framebuffer, fixed.smem_len);
         return 0;
@@ -871,7 +901,8 @@ static void *stream_worker(void *unused)
         int client = accept(listener, 0, 0);
         if (client < 0)
             continue;
-        stream_client(client, framebuffer, shadow, message, message_capacity,
+        stream_client(client, framebuffer, snapshot, shadow,
+                      message, message_capacity,
                       scratch, hash_table, &variable, &fixed,
                       visible_offset, frames_per_second);
         close(client);

@@ -170,6 +170,13 @@ The firmware's zlib and a per-tile XOR codec are fallbacks. TCP preserves
 ordering; a host that detects a sequence gap waits for a fresh connection and
 keyframe. Fixed bounds and network byte order keep the receiver simple.
 
+Each wire update starts by copying the visible framebuffer into a private,
+packed snapshot. Every encoder fallback and the sender's reference frame use
+that same snapshot. This consistency boundary is required because `rbp` may
+redraw `/dev/fb0` while the worker compresses a frame. Advancing the reference
+from a second framebuffer read causes the sender and receiver XOR histories to
+diverge, corrupting every later delta.
+
 ## Bandwidth
 
 A complete 1280x800 RGB565 frame is 2,048,000 bytes:
@@ -234,9 +241,13 @@ The firmware's zlib compressed one 2,048,000-byte XOR frame to 43,611 bytes in
 but a self-contained LZ4 block encoder gives similar wire size with predictable
 CPU cost and no additional runtime library. The live module therefore tries LZ4
 first, zlib second, and per-tile RLE last. A static player screen produced tiny
-updates around 0.01 to 0.02 Mbit/s after this change. A moving-waveform live rate
-still needs measurement after the player is reloaded following the module
-restart.
+updates around 0.01 to 0.03 Mbit/s after this change. Live browser sampling on
+the waveform screen reached 7.2 frames per second at 2.04 Mbit/s. This is an
+observed point rather than a maximum-rate benchmark, but it confirms that the
+compressed stream remains synchronized during rapid redraws while using
+substantially less bandwidth than raw tiles. It is still below a fluid 15 to 30
+frames per second, so the hardware IPU and VPU path is the next implementation
+target.
 
 ## Live validation order
 
