@@ -32,8 +32,21 @@ def main() -> None:
             "failed listener verification must stop the launched process")
     require("register_prepare_hook usb_link_root_shell_start" in MODULE,
             "the shell must start while the stock Link Export network is active")
-    require("169\\.254\\." in MODULE,
-            "the status message must prefer the Link Export AutoIP address")
+    require("USB_LINK_ROOT_SHELL_INTERFACE=eth0" in MODULE and
+            "USB_LINK_ROOT_SHELL_ALIAS=eth0:rx3shell" in MODULE,
+            "the deterministic address must use a secondary alias on Link Export")
+    require("USB_LINK_ROOT_SHELL_ADDRESS=169.254.100.2" in MODULE,
+            "the documented shell address must remain stable")
+    require('netmask 255.255.0.0 up' in MODULE,
+            "the secondary address must cover the Link Export AutoIP subnet")
+
+    configure = MODULE.index("usb_link_root_shell_configure_address || return 1")
+    listener = MODULE.index("if usb_link_root_shell_owned_listener", configure)
+    launch = MODULE.index("/bin/busybox telnetd", listener)
+    require(configure < listener < launch,
+            "the address must be verified before reusing or launching telnetd")
+    require("! usb_link_root_shell_address_ready" in MODULE,
+            "the alias command must be followed by an address verification")
 
 
 if __name__ == "__main__":

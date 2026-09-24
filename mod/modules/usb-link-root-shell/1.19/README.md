@@ -4,7 +4,9 @@
 This firmware 1.19 module runs BusyBox `telnetd -F -l /bin/sh` on TCP port 23.
 Each connection opens `/bin/sh` directly as root, with no username or password.
 It uses the RX3's existing Link Export network over the rear USB-B computer
-port and leaves the stock USB gadget in place.
+port and leaves the stock USB gadget in place. Before starting the daemon, it
+adds `169.254.100.2/16` as the `eth0:rx3shell` secondary address. The primary
+Link Export address remains intact, so the firmware can continue managing it.
 
 The toolkit keeps the foreground daemon's process ID in `/tmp`. Reinserting the
 drive during the same boot recognizes the owned listener and leaves it running.
@@ -27,29 +29,31 @@ selected together.
 1. Build the toolkit drive with **USB Link root shell** selected, connect the
    Mac directly to the RX3's rear USB-B computer port, and insert the toolkit
    drive in the player.
-2. Give Link Export time to appear. macOS and the RX3 choose Automatic Private
-   IP addresses in `169.254.0.0/16`; there is no DHCP server and the addresses
-   can change after either end reconnects.
-3. Find the Mac interface and the RX3 address:
+2. Give Link Export time to appear. macOS normally gives its side an Automatic
+   Private IP address in `169.254.0.0/16`. The RX3 shell is always available at
+   `169.254.100.2`, including after the rear cable is reconnected.
+3. Connect with a Telnet client:
 
    ```sh
-   ifconfig | awk '/^[a-z0-9]+:/{i=$1; sub(":", "", i)} /inet 169\.254\./{print i, $2}'
-   arp -an | grep '169\.254\.'
-   ```
-
-   The first command identifies the Mac's Link Export interface. In the ARP
-   output, use the other `169.254.x.y` address, associated with that interface.
-   If it has not appeared yet, unplug and reconnect the USB-B cable, wait for
-   the interface to return, and run `arp -an` again.
-4. Connect with a Telnet client:
-
-   ```sh
-   telnet 169.254.x.y 23
+   telnet 169.254.100.2 23
    ```
 
    Current macOS releases may not include a Telnet client. A Homebrew Telnet
-   client works; `nc 169.254.x.y 23` is a basic fallback but does not perform
+   client works; `nc 169.254.100.2 23` is a basic fallback but does not perform
    terminal negotiation.
+
+If macOS does not assign an Automatic Private address, identify the direct USB
+network interface and add a host address without replacing any existing one:
+
+```sh
+ifconfig | awk '/^[a-z0-9]+:/{i=$1; sub(":", "", i)} /status: active/{print i}'
+sudo ifconfig enX inet 169.254.100.1 netmask 255.255.0.0 alias
+telnet 169.254.100.2 23
+```
+
+Replace `enX` with the rear USB-B network interface. The fixed addresses assume
+a direct, isolated cable; disconnect another device using either address before
+testing.
 
 There is no login prompt. A shell prompt means the direct root session is
 ready. Run `id` to verify that it reports UID 0, and use `exit` to close the
