@@ -82,7 +82,7 @@ The firmware already contains a master recorder. `MasterOutChannel::update`
 at `0x00059490` calls:
 
 ```c
-WavWriter::copyBuffer(common::Float2 const *samples, int frames);
+int WavWriter::copyBuffer(common::Float2 const *samples, int frames);
 ```
 
 `WavWriter::copyBuffer` is at `0x0005bb48`. The method is called for every
@@ -90,6 +90,11 @@ mixed block and internally decides whether recording is active. Its caller can
 select between two mixer buffers according to the microphone-recording
 setting. The default recorder path includes the microphone. The surrounding
 API includes:
+
+The integer return was recovered from the caller and callee because C++ name
+mangling does not encode it. The caller tests `r0` after the call; inactive
+paths return zero and accepted recording paths explicitly return one. The
+preload preserves that value when it forwards to the original method.
 
 | Function | Address |
 | --- | ---: |
@@ -231,3 +236,17 @@ the worker after capture stops, and compare it with the RX3's own recording.
 Once channel order, microphone inclusion, continuity, and block cadence are
 confirmed, the same ring can feed the TCP service without changing the audio
 hook.
+
+## Live PCM stream result
+
+The firmware 1.19 prototype hooks `WavWriter::copyBuffer`, copies each block
+into a 32-slot SPSC ring, converts to PCM16 in a nice-10 worker, and serves it
+on TCP port 7355 over USB Link Ethernet. Its common `RX3A` framing carries the
+first-frame counter and cumulative dropped-frame count for every block.
+
+An idle-device capture on September 24, 2026 produced 14.93 seconds of valid
+44.1 kHz, 16-bit stereo WAV data. The hook delivered 10,291 64-frame blocks at
+1.4112 Mbit/s with no sequence gaps, timestamp gaps, or sender drops. All
+samples were zero because neither deck was playing. This verifies continuous
+real-time capture and transport; playback content, channel order, and the
+microphone-setting behavior still require an audible capture.
