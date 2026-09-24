@@ -1,0 +1,18 @@
+{
+  "id": "rekordbox-capture",
+  "name": "Rekordbox connection capture (prototype)",
+  "description": "Records one bounded HID, MIDI, and Link Ethernet session to the toolkit USB drive.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 100,
+  "runtime_directory": "rekordbox-capture",
+  "namespace": "rekordbox_capture",
+  "requires": [],
+  "conflicts": ["usb-link-root-shell", "usb-serial", "usb-telemetry"],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false},
+    {"source": "librx3_rekordbox_capture.so", "target": "librx3_rekordbox_capture.so", "executable": false},
+    {"source": "rx3-eth0-capture", "target": "rx3-eth0-capture", "executable": true}
+  ],
+  "build_files": ["rx3_rekordbox_capture.c", "rx3_eth0_capture.c"]
+}
