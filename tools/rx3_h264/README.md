@@ -1,21 +1,43 @@
-# RX3 H.264 browser relay
+# RX3 live browser relay
 
-This host-side relay connects to the RX3 hardware H.264 streamer and forwards
-complete Annex-B access units to browsers over a WebSocket. Browsers decode the
-stream directly with WebCodecs, so the relay does not transcode or require
-FFmpeg.
+This host-side relay connects independently to the RX3 hardware H.264 streamer
+and PCM capture module, then forwards both streams to browsers. Browsers decode
+H.264 with WebCodecs and play PCM with an AudioWorklet, so the relay does not
+transcode or require FFmpeg. Audio starts only after pressing **Start audio**,
+as required by mobile browser autoplay policies.
 
 Run it from the repository root:
 
 ```bash
 python3 -m tools.rx3_h264.relay \
   --rx3-host 169.254.100.2 --rx3-port 7353 \
+  --rx3-audio-port 7355 \
   --bind 127.0.0.1 --port 7353
 ```
 
 The viewer is then available at `http://127.0.0.1:7353/` and, with the server's
 existing nginx tailnet proxy, at `https://7353.prk.network/`. The JSON health
 endpoint is `/healthz`.
+
+The RX3 connections stay separate: video uses TCP 7353 and audio uses TCP
+7355. The browser endpoints are `/stream` and `/audio`. A slow video client
+drops an entire stale GOP; a slow audio client drops its queued PCM and resumes
+from the newest block. Audio WebSocket frames batch up to eight RX3 blocks to
+avoid sending hundreds of tiny WebSocket messages per second. The AudioWorklet
+has a bounded two-second ring and begins playback with 150 ms buffered.
+The browser linearly resamples the RX3's 44.1 kHz stream when a phone fixes its
+AudioContext to a different hardware rate such as 48 kHz.
+
+## A/V timing
+
+The current device protocols expose independent counters: microseconds from
+the video process and sample frames from the audio hook. They do not expose a
+shared start epoch. The viewer therefore treats audio as the playback clock
+and delays video presentation by the same 150 ms used for PCM preroll. This
+keeps the streams close on the low-jitter USB Ethernet link, but it is arrival-
+time synchronization rather than sample-accurate synchronization. A shared
+device monotonic timestamp in both protocol headers would allow the relay to
+calculate and continuously correct the exact offset.
 
 ## Wire format
 

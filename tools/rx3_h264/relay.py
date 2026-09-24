@@ -1,4 +1,4 @@
-"""Relay a framed RX3 Annex-B stream to browsers using WebCodecs."""
+"""Relay RX3 H.264 video and PCM audio to browsers without transcoding."""
 
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ import threading
 import time
 
 from .protocol import ACCESS_UNIT, CONFIG, Decoder, Message, ProtocolError
+from tools.rx3_audio.protocol import (
+    CONFIG as AUDIO_CONFIG,
+    PCM,
+    Decoder as AudioDecoder,
+    Message as AudioMessage,
+    ProtocolError as AudioProtocolError,
+)
 
 
 LOG = logging.getLogger("rx3-h264-relay")
@@ -25,7 +32,7 @@ INDEX_HTML = r"""<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>RX3 H.264</title>
+<title>RX3 Live</title>
 <style>
   :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, monospace }
   * { box-sizing: border-box }
@@ -38,10 +45,13 @@ INDEX_HTML = r"""<!doctype html>
   canvas { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5;
            background: #000; border: 1px solid #263244; border-radius: 6px }
   .ok { color: #65e6a5 } .bad { color: #ff7c85 }
+  button { border: 1px solid #526784; border-radius: 4px; padding: 5px 10px;
+           background: #182231; color: #f3f7fc; font: inherit }
 </style>
 <main>
-  <header><strong>RX3 H.264 LIVE</strong><span id="state">connecting</span>
-    <span id="rate">—</span><span id="bandwidth">—</span><span id="latency">—</span></header>
+  <header><strong>RX3 LIVE</strong><span id="state">connecting</span>
+    <span id="rate">—</span><span id="bandwidth">—</span><span id="latency">—</span>
+    <button id="audio">Start audio</button><span id="audio-state">audio idle</span></header>
   <canvas id="display" width="640" height="400"></canvas>
 </main>
 <script>
@@ -50,10 +60,15 @@ const rate = document.querySelector('#rate');
 const bandwidth = document.querySelector('#bandwidth');
 const latency = document.querySelector('#latency');
 const canvas = document.querySelector('#display');
+const audioButton = document.querySelector('#audio');
+const audioState = document.querySelector('#audio-state');
 const context = canvas.getContext('2d', {alpha: false, desynchronized: true});
 let decoder, configPrefix, frames = 0, bytes = 0, statsAt = performance.now();
 let awaitingKeyframe = true;
 const arrivals = new Map();
+let audioContext, audioNode, audioSocket, audioBufferedMs = 0;
+let sourceAudioRate = 44100, resamplePosition = 1, resampleTail = null;
+const AUDIO_PREROLL_MS = 150;
 
 function configure() {
   if (!('VideoDecoder' in globalThis)) {
@@ -66,13 +81,16 @@ function configure() {
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
         canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
       }
-      context.drawImage(frame, 0, 0, canvas.width, canvas.height);
       const arrivedAt = arrivals.get(frame.timestamp);
       if (arrivedAt !== undefined) {
-        latency.textContent = `${(performance.now() - arrivedAt).toFixed(0)} ms decode`;
+        const decodeMs = (performance.now() - arrivedAt).toFixed(0);
+        latency.textContent = audioContext && audioContext.state === 'running' ?
+          `${decodeMs} ms decode · ${AUDIO_PREROLL_MS} ms A/V` : `${decodeMs} ms decode`;
         arrivals.delete(frame.timestamp);
       }
-      frame.close(); frames++;
+      const draw = () => { context.drawImage(frame, 0, 0, canvas.width, canvas.height); frame.close(); frames++; };
+      if (audioContext && audioContext.state === 'running') setTimeout(draw, AUDIO_PREROLL_MS);
+      else draw();
     },
     error(error) { state.textContent = `decoder: ${error.message}`; state.className = 'bad'; }
   });
@@ -129,6 +147,132 @@ function connect() {
   websocket.onerror = () => websocket.close();
 }
 connect();
+
+const workletSource = `
+class Rx3PcmPlayer extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.channels = [new Float32Array(sampleRate * 2), new Float32Array(sampleRate * 2)];
+    this.read = 0; this.write = 0; this.available = 0; this.primed = false;
+    this.target = Math.round(sampleRate * ${AUDIO_PREROLL_MS} / 1000);
+    this.reportAt = 0;
+    this.port.onmessage = ({data}) => {
+      if (data.reset) { this.read = this.write = this.available = 0; this.primed = false; return; }
+      const left = data.left, right = data.right;
+      const capacity = this.channels[0].length;
+      const needed = Math.max(0, this.available + left.length - capacity);
+      this.read = (this.read + needed) % capacity; this.available -= needed;
+      for (let i = 0; i < left.length; i++) {
+        this.channels[0][this.write] = left[i]; this.channels[1][this.write] = right[i];
+        this.write = (this.write + 1) % capacity;
+      }
+      this.available += left.length;
+      if (!this.primed && this.available >= this.target) this.primed = true;
+    };
+  }
+  process(inputs, outputs) {
+    const output = outputs[0], count = output[0].length, capacity = this.channels[0].length;
+    if (this.primed && this.available < count) this.primed = false;
+    for (let i = 0; i < count; i++) {
+      const have = this.primed && this.available > 0;
+      output[0][i] = have ? this.channels[0][this.read] : 0;
+      output[1][i] = have ? this.channels[1][this.read] : 0;
+      if (have) { this.read = (this.read + 1) % capacity; this.available--; }
+    }
+    this.reportAt += count;
+    if (this.reportAt >= sampleRate / 4) {
+      this.port.postMessage({bufferedMs: this.available * 1000 / sampleRate, primed: this.primed});
+      this.reportAt = 0;
+    }
+    return true;
+  }
+}
+registerProcessor('rx3-pcm-player', Rx3PcmPlayer);`;
+
+function connectAudio() {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  audioSocket = new WebSocket(`${scheme}://${location.host}/audio`);
+  audioSocket.binaryType = 'arraybuffer';
+  audioSocket.onopen = () => { audioState.textContent = 'audio buffering'; audioState.className = 'ok'; };
+  audioSocket.onmessage = ({data}) => {
+    const view = new DataView(data);
+    const blocks = [];
+    let offset = 0, totalFrames = 0;
+    while (offset + 28 <= view.byteLength) {
+      if (view.getUint32(offset) !== 0x52583341 || view.getUint8(offset + 4) !== 1) return;
+      const type = view.getUint8(offset + 5), length = view.getUint32(offset + 12);
+      if (offset + 28 + length > view.byteLength) return;
+      if (type === 1) {
+        const rate = view.getUint32(offset + 28), channels = view.getUint16(offset + 32);
+        const format = view.getUint16(offset + 34);
+        if (channels !== 2 || format !== 1) {
+          audioState.textContent = `unsupported ${rate} Hz/${channels}ch`; audioState.className = 'bad';
+          audioSocket.close(); return;
+        }
+        if (rate !== sourceAudioRate) {
+          sourceAudioRate = rate; resamplePosition = 1; resampleTail = null;
+        }
+      } else if (type === 2 && length % 4 === 0) {
+        blocks.push([offset + 28, length / 4]); totalFrames += length / 4;
+      }
+      offset += 28 + length;
+    }
+    if (offset !== view.byteLength || totalFrames === 0) return;
+    const sourceLeft = new Float32Array(totalFrames), sourceRight = new Float32Array(totalFrames);
+    let output = 0;
+    for (const [start, frames] of blocks) {
+      for (let i = 0; i < frames; i++, output++) {
+        sourceLeft[output] = view.getInt16(start + i * 4, true) / 32768;
+        sourceRight[output] = view.getInt16(start + i * 4 + 2, true) / 32768;
+      }
+    }
+    const [left, right] = resample(sourceLeft, sourceRight);
+    audioNode.port.postMessage({left, right}, [left.buffer, right.buffer]);
+  };
+  audioSocket.onclose = () => {
+    resamplePosition = 1; resampleTail = null;
+    audioNode.port.postMessage({reset: true});
+    audioState.textContent = 'audio reconnecting'; audioState.className = 'bad';
+    setTimeout(connectAudio, 1000);
+  };
+  audioSocket.onerror = () => audioSocket.close();
+}
+
+function resample(sourceLeft, sourceRight) {
+  if (sourceLeft.length === 0) return [sourceLeft, sourceRight];
+  if (resampleTail === null) resampleTail = [sourceLeft[0], sourceRight[0]];
+  const step = sourceAudioRate / audioContext.sampleRate;
+  const capacity = Math.ceil((sourceLeft.length + 1) / step) + 1;
+  const left = new Float32Array(capacity), right = new Float32Array(capacity);
+  const sample = (channel, index) => index === 0 ? resampleTail[channel] :
+    (channel === 0 ? sourceLeft[index - 1] : sourceRight[index - 1]);
+  let count = 0;
+  while (resamplePosition < sourceLeft.length) {
+    const index = Math.floor(resamplePosition), fraction = resamplePosition - index;
+    left[count] = sample(0, index) + (sample(0, index + 1) - sample(0, index)) * fraction;
+    right[count] = sample(1, index) + (sample(1, index + 1) - sample(1, index)) * fraction;
+    count++; resamplePosition += step;
+  }
+  resamplePosition -= sourceLeft.length;
+  resampleTail = [sourceLeft[sourceLeft.length - 1], sourceRight[sourceRight.length - 1]];
+  return [left.slice(0, count), right.slice(0, count)];
+}
+
+audioButton.onclick = async () => {
+  if (audioContext) { await audioContext.resume(); return; }
+  audioContext = new AudioContext({latencyHint: 'interactive'});
+  const blob = new Blob([workletSource], {type: 'text/javascript'});
+  await audioContext.audioWorklet.addModule(URL.createObjectURL(blob));
+  audioNode = new AudioWorkletNode(audioContext, 'rx3-pcm-player', {outputChannelCount: [2]});
+  audioNode.connect(audioContext.destination);
+  audioNode.port.onmessage = ({data}) => {
+    audioBufferedMs = data.bufferedMs;
+    audioState.textContent = `audio ${data.primed ? 'live' : 'buffering'} · ${audioBufferedMs.toFixed(0)} ms`;
+  };
+  await audioContext.resume();
+  audioButton.disabled = true; audioButton.textContent = 'Audio enabled';
+  connectAudio();
+};
 </script>
 </html>
 """
@@ -275,6 +419,123 @@ class RelayHub:
             }
 
 
+class AudioSubscription:
+    """Bounded low-latency PCM queue for one browser."""
+
+    def __init__(self, maximum: int = 256) -> None:
+        self._condition = threading.Condition()
+        self._messages: deque[bytes] = deque(maxlen=maximum)
+        self._config: bytes | None = None
+        self.closed = False
+        self.dropped = 0
+
+    def put(self, message: AudioMessage) -> None:
+        with self._condition:
+            if self.closed:
+                return
+            encoded = message.encode()
+            if message.type == AUDIO_CONFIG:
+                self._config = encoded
+                self.dropped += len(self._messages)
+                self._messages.clear()
+                self._messages.append(encoded)
+                self._condition.notify()
+                return
+            if message.type != PCM:
+                return
+            if len(self._messages) == self._messages.maxlen:
+                self.dropped += len(self._messages)
+                self._messages.clear()
+                if self._config is not None:
+                    self._messages.append(self._config)
+            self._messages.append(encoded)
+            self._condition.notify()
+
+    def get(self, timeout: float) -> bytes | None:
+        with self._condition:
+            if not self._messages and not self.closed:
+                self._condition.wait(timeout)
+            return self._messages.popleft() if self._messages else None
+
+    def get_batch(self, timeout: float, maximum: int = 8) -> bytes | None:
+        with self._condition:
+            if not self._messages and not self.closed:
+                self._condition.wait(timeout)
+            if not self._messages:
+                return None
+            messages = [self._messages.popleft()]
+            while self._messages and len(messages) < maximum:
+                messages.append(self._messages.popleft())
+            return b"".join(messages)
+
+    def close(self) -> None:
+        with self._condition:
+            self.closed = True
+            self._condition.notify_all()
+
+
+class AudioHub:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._clients: set[AudioSubscription] = set()
+        self._config: AudioMessage | None = None
+        self._connected = False
+        self._last_message_at: float | None = None
+        self._blocks = 0
+        self._bytes = 0
+        self._errors = 0
+
+    def set_connected(self, connected: bool) -> None:
+        with self._lock:
+            self._connected = connected
+
+    def record_error(self) -> None:
+        with self._lock:
+            self._errors += 1
+
+    def publish(self, message: AudioMessage) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._last_message_at = now
+            self._bytes += len(message.payload) + 28
+            if message.type == AUDIO_CONFIG:
+                self._config = message
+            elif message.type == PCM:
+                self._blocks += 1
+            clients = tuple(self._clients)
+        for client in clients:
+            client.put(message)
+
+    def subscribe(self) -> AudioSubscription:
+        subscription = AudioSubscription()
+        with self._lock:
+            self._clients.add(subscription)
+            config = self._config
+        if config is not None:
+            subscription.put(config)
+        return subscription
+
+    def unsubscribe(self, subscription: AudioSubscription) -> None:
+        with self._lock:
+            self._clients.discard(subscription)
+        subscription.close()
+
+    def health(self) -> dict[str, object]:
+        now = time.monotonic()
+        with self._lock:
+            age = None if self._last_message_at is None else now - self._last_message_at
+            return {
+                "ok": self._connected and age is not None and age < 3,
+                "upstream_connected": self._connected,
+                "last_message_age_seconds": None if age is None else round(age, 3),
+                "blocks": self._blocks,
+                "bytes": self._bytes,
+                "clients": len(self._clients),
+                "client_drops": sum(client.dropped for client in self._clients),
+                "errors": self._errors,
+            }
+
+
 class Upstream(threading.Thread):
     def __init__(self, hub: RelayHub, host: str, port: int) -> None:
         super().__init__(name="rx3-h264-upstream", daemon=True)
@@ -307,7 +568,39 @@ class Upstream(threading.Thread):
                     self.hub.publish(message)
 
 
-def make_handler(hub: RelayHub):
+class AudioUpstream(threading.Thread):
+    def __init__(self, hub: AudioHub, host: str, port: int) -> None:
+        super().__init__(name="rx3-pcm-upstream", daemon=True)
+        self.hub = hub
+        self.host = host
+        self.port = port
+
+    def run(self) -> None:
+        while True:
+            try:
+                self._receive()
+            except (OSError, AudioProtocolError) as error:
+                self.hub.record_error()
+                LOG.warning("RX3 audio stream disconnected: %s", error)
+            finally:
+                self.hub.set_connected(False)
+            time.sleep(1)
+
+    def _receive(self) -> None:
+        LOG.info("connecting to RX3 audio stream at %s:%d", self.host, self.port)
+        with socket.create_connection((self.host, self.port), timeout=5) as upstream:
+            upstream.settimeout(5)
+            decoder = AudioDecoder()
+            self.hub.set_connected(True)
+            while True:
+                data = upstream.recv(256 * 1024)
+                if not data:
+                    raise ConnectionError("RX3 closed the audio stream")
+                for message in decoder.feed(data):
+                    self.hub.publish(message)
+
+
+def make_handler(hub: RelayHub, audio_hub: AudioHub | None = None):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/":
@@ -322,6 +615,8 @@ def make_handler(hub: RelayHub):
 
             if self.path == "/healthz":
                 health = hub.health()
+                if audio_hub is not None:
+                    health["audio"] = audio_hub.health()
                 body = json.dumps(health, separators=(",", ":")).encode()
                 self.send_response(200 if health["ok"] else 503)
                 self.send_header("Content-Type", "application/json")
@@ -332,16 +627,21 @@ def make_handler(hub: RelayHub):
                 return
 
             if self.path == "/stream" and self.headers.get("Upgrade", "").lower() == "websocket":
-                self._websocket()
+                self._video_websocket()
+                return
+
+            if (self.path == "/audio" and audio_hub is not None and
+                    self.headers.get("Upgrade", "").lower() == "websocket"):
+                self._audio_websocket()
                 return
 
             self.send_error(404)
 
-        def _websocket(self) -> None:
+        def _upgrade_websocket(self) -> bool:
             key = self.headers.get("Sec-WebSocket-Key")
             if not key:
                 self.send_error(400, "missing WebSocket key")
-                return
+                return False
             accept = base64.b64encode(hashlib.sha1(
                 (key + _WEBSOCKET_GUID).encode()
             ).digest()).decode()
@@ -350,9 +650,14 @@ def make_handler(hub: RelayHub):
             self.send_header("Connection", "Upgrade")
             self.send_header("Sec-WebSocket-Accept", accept)
             self.end_headers()
+            self.connection.settimeout(2)
+            return True
+
+        def _video_websocket(self) -> None:
+            if not self._upgrade_websocket():
+                return
 
             subscription = hub.subscribe()
-            self.connection.settimeout(2)
             try:
                 while not subscription.closed:
                     message = subscription.get(10)
@@ -365,6 +670,23 @@ def make_handler(hub: RelayHub):
             finally:
                 hub.unsubscribe(subscription)
 
+        def _audio_websocket(self) -> None:
+            if not self._upgrade_websocket() or audio_hub is None:
+                return
+
+            subscription = audio_hub.subscribe()
+            try:
+                while not subscription.closed:
+                    message = subscription.get_batch(10)
+                    if message is None:
+                        self.connection.sendall(b"\x89\x00")
+                    else:
+                        self.connection.sendall(_websocket_frame(message))
+            except OSError:
+                pass
+            finally:
+                audio_hub.unsubscribe(subscription)
+
         def log_message(self, format: str, *args: object) -> None:
             LOG.info("%s - %s", self.client_address[0], format % args)
 
@@ -375,6 +697,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rx3-host", default="169.254.100.2")
     parser.add_argument("--rx3-port", type=int, default=7353)
+    parser.add_argument("--rx3-audio-port", type=int, default=7355)
+    parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7353)
     parser.add_argument("--verbose", action="store_true")
@@ -389,7 +713,11 @@ def main() -> None:
     )
     hub = RelayHub()
     Upstream(hub, args.rx3_host, args.rx3_port).start()
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(hub))
+    audio_hub = None
+    if not args.no_audio:
+        audio_hub = AudioHub()
+        AudioUpstream(audio_hub, args.rx3_host, args.rx3_audio_port).start()
+    server = ThreadingHTTPServer((args.bind, args.port), make_handler(hub, audio_hub))
     LOG.info("browser viewer listening at http://%s:%d", args.bind, args.port)
     server.serve_forever()
 
