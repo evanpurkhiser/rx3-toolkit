@@ -41,6 +41,12 @@ Run these in order because later removals depend on earlier results.
 
 ### 1. Preserve LAN device `0x29` end to end
 
+**Result: passed twice on firmware 1.19.** Both cold sessions registered peer
+ID `0x29`, advanced `pc_detect['29']` to `2`, mounted the rekordbox NFS drive,
+opened a fresh dynamic dbserver connection, and rendered the requested track
+list. The RX3 labels this identity as a mobile device in SOURCE. That label is
+the only observed behavior difference from the translated `0x11` baseline.
+
 Disable both device-ID translations as one experiment:
 
 - forward Rekordbox's UDP identity as `0x29` instead of changing it to `0x11`;
@@ -54,6 +60,20 @@ PC IDs `0x29` through `0x2c` in the SOURCE builder.
 
 The two translations must change together. The already-proven mixed state,
 UDP `0x11` plus dbserver `0x29`, causes the RX3 to close the database connection.
+
+The passing result proves the server and future transparent bridge do not need
+to rewrite `0x29` for protocol compatibility. Keep the coherent `0x29` mode as
+the reference configuration for the remaining subtraction tests. Treat source
+icon or label changes separately from transport behavior.
+
+The firmware explains the mobile presentation directly. `ConvertBrowseUi2Gui`
+assigns SOURCE presentation enum `3` to device IDs `0x11` and `0x12`, and enum
+`4` to IDs `0x29` through `0x2c`. `IsRemoteDeviceRekMobile` independently uses
+the same `0x29`-through-`0x2c` range. Packet type, media type, display name, and
+the property response do not select this class. A targeted runtime UI override
+could change a constructed row's primary enum at `row + 0x88`, but there is no
+smaller cosmetic field to translate on the wire. The mobile presentation is
+therefore expected for a transparent bridge carrying Rekordbox's LAN identity.
 
 ### 2. Replace the TCP broker with one-to-one NAT
 

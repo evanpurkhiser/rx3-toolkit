@@ -14,9 +14,11 @@ The direct macOS-to-RX3 capture shows three parts to a working session:
 
 `relay.py` forwards Pro DJ Link UDP ports 50000-50002 and rewrites embedded
 endpoint addresses and identities. Its TCP broker handles the
-`RemoteDBServer` query and the returned dynamic port, translating the first
-dbserver response from rekordbox's LAN device ID to its USB device ID. Later
-library messages pass through byte-for-byte. `setup-nat.sh` routes RPC, mountd,
+`RemoteDBServer` query and the returned dynamic port. By default it translates
+the first dbserver response from rekordbox's LAN device ID to its USB device
+ID; the tested `--preserve-rekordbox-device-id` mode leaves both UDP and
+dbserver identity at `0x29`. Later library messages pass through byte-for-byte.
+`setup-nat.sh` routes RPC, mountd,
 NFS, and other unicast UDP traffic through conntrack. The relay also maintains
 the stock USB-MIDI PC-control gate.
 
@@ -67,7 +69,7 @@ and `0x0c` behind the single virtual RX3 address.
 | Virtual rekordbox on USB | `169.254.100.1`, MAC `c8:3d:fc:16:af:9a` | server USB NIC |
 | RX3 control alias | `169.254.100.2/16` | USB Link root-shell module |
 | RX3 stock primary | `169.254.175.153/16` in the tested session | RX3 link-local setup |
-| Rekordbox USB identity | device `0x11` | translated relay identity |
+| Rekordbox identity | device `0x29` preserved, or `0x11` in compatibility mode | relay policy |
 
 `RX3_PRIMARY_IP` is explicit because `rbp` originates dbserver, RPC, mountd,
 and NFS from the stock primary address even when Telnet and relayed control
@@ -80,21 +82,22 @@ traffic use the stable alias.
 | USB Link root-shell module | Adds `169.254.100.2/16` and exposes the diagnostic shell |
 | `rx3_link_bootstrap.c` | Replays the stock mounted callback after `rbp` starts; resumes Discovery/Connecting only if the application remains in LinkStop |
 | Raw USB MIDI loop | Sends the captured host initialization, then refreshes the one-second PC-control lease every 200 ms |
-| UDP relay | Forwards ports 50000-50002 and translates embedded IP, MAC, and rekordbox device-ID fields |
-| TCP dbserver broker | Proxies port 12523 and its returned dynamic port; normalizes only the first server identity `0x29` to `0x11` |
+| UDP relay | Forwards ports 50000-50002 and translates embedded IP and MAC fields; device-ID translation is optional |
+| TCP dbserver broker | Proxies port 12523 and its returned dynamic port; optionally normalizes the first server identity `0x29` to `0x11` |
 | nftables/conntrack | Routes RPC, dynamic mountd, NFSv2, and fragmented UDP between the peers |
 | `inspect_ui.py` | Reads peer, media-detect, NFS-drive, and rendered SOURCE state over Telnet |
 
 The direct track browser test exercised every row in this table. Source
 discovery required a successful UDP `0x30`/`0x31` exchange. Opening the source
-then required the dbserver identity translation before the RX3 would continue
-with menu requests.
+then required a dbserver identity matching the UDP discovery identity before
+the RX3 would continue with menu requests. Coherent `0x29` and coherent `0x11`
+both pass; mixed identities fail.
 
 ## Traffic paths
 
 | Traffic | Server path | Translation |
 | --- | --- | --- |
-| UDP 50000-50002 | `relay.py` sockets | IPs, MACs, and rekordbox `0x29`/`0x11` identity |
+| UDP 50000-50002 | `relay.py` sockets | IPs and MACs; optional rekordbox `0x29`/`0x11` identity |
 | TCP 12523 | local dbserver broker | returned port is preserved |
 | Runtime dbserver TCP | local dynamic broker listener | final `UInt32` in first response only |
 | RPC, mountd, NFSv2 UDP | nftables DNAT/SNAT | IP headers only |
@@ -176,11 +179,10 @@ dbserver dynamic port ready: <runtime port>
 dbserver identity normalized: 0x29 -> 0x11
 ```
 
-### Experimental LAN identity mode
+### Preserved LAN identity mode
 
-The default relay behavior above remains the tested path. To test whether the
-RX3 accepts rekordbox's LAN personality consistently across both protocols,
-start the relay with `--preserve-rekordbox-device-id`:
+The RX3 accepts rekordbox's LAN personality consistently across discovery and
+dbserver. Start the relay with `--preserve-rekordbox-device-id`:
 
 ```sh
 python3 -m tools.rx3_link_export.relay \
@@ -197,7 +199,7 @@ MAC translation, the TCP broker, MIDI activation, and the routed NFS data path
 remain active. Keeping both identity surfaces together avoids the known mixed
 session where UDP registers device `0x11` but dbserver reports `0x29`.
 
-Use a cold session for the experiment: quit rekordbox, restart the relay, and
+Use a cold session: quit rekordbox, restart the relay, and
 restart or relaunch the RX3 application before enabling LINK. A successful
 SOURCE state should show peer ID `0x29`, a nonzero `pc_detect['29']` value, and
 the rekordbox computer in the rendered rows:
@@ -208,10 +210,19 @@ peer[0] id=41 flags=0x01 name='macbook-air'
 row[0] name='macbook-air'
 ```
 
-The detect value may advance from `1` to `2` as the PC-backed media becomes
-ready. The relay should print the dynamic dbserver port without printing
+The detect value advances from `1` to `2` as the PC-backed media becomes
+ready. The relay prints the dynamic dbserver port without printing
 `dbserver identity normalized: 0x29 -> 0x11`. Select the source and open a
-track list to prove the preserved identity also passes the dbserver gate.
+track list to exercise the dbserver gate. Two live firmware 1.19 sessions
+reached this state and rendered thousands of track rows. SOURCE presents the
+preserved `0x29` peer as a mobile device; browsing behavior is otherwise the
+same as the translated baseline.
+
+The mobile presentation follows directly from the numeric ID. Firmware assigns
+SOURCE presentation enum `3` to IDs `0x11` and `0x12`, and enum `4` to IDs
+`0x29` through `0x2c`. It also classifies the latter range as Rekordbox mobile
+elsewhere. There is no independent packet field that can change only the icon
+or label while preserving coherent `0x29` identity.
 
 The reliable cold-start order is:
 
