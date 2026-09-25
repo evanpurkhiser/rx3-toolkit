@@ -22,6 +22,7 @@ from tools.rx3_link_export.relay import (
     rx3_claim_sequence,
     translate_addresses,
     translate_identity,
+    translate_rekordbox_packet,
 )
 
 
@@ -38,7 +39,10 @@ def dbserver_message(*values: int) -> bytes:
     return b"".join(fields)
 
 
-def test_config(rekordbox_ip: str = "127.0.0.1") -> RelayConfig:
+def test_config(
+    rekordbox_ip: str = "127.0.0.1",
+    preserve_rekordbox_device_id: bool = False,
+) -> RelayConfig:
     return RelayConfig(
         lan_interface="lan0",
         usb_interface="usb0",
@@ -50,6 +54,7 @@ def test_config(rekordbox_ip: str = "127.0.0.1") -> RelayConfig:
         usb_broadcast="169.254.255.255",
         rx3_mac=bytes.fromhex("c83dfc16af99"),
         usb_rekordbox_mac=bytes.fromhex("c83dfc16af9a"),
+        preserve_rekordbox_device_id=preserve_rekordbox_device_id,
     )
 
 
@@ -96,6 +101,33 @@ class RelayTests(unittest.TestCase):
 
         expected = b"\x11\x00\x00\x00\x01" + dbserver_message(1, 0x11) + later
         self.assertEqual(result, expected)
+
+    def test_preserves_lan_device_id_in_udp_and_dbserver_together(self):
+        config = test_config(
+            rekordbox_ip="10.0.0.119",
+            preserve_rekordbox_device_id=True,
+        )
+        state = RelayState(rekordbox_device_id=0x29)
+        source_mac = bytes.fromhex("1c57dc3900bb")
+        announcement = bytearray(PRO_DJ_LINK_MAGIC + b"\x06" + bytes(43))
+        announcement[36] = 0x29
+        announcement[38:44] = source_mac
+        announcement[44:48] = socket.inet_aton(config.rekordbox_ip)
+
+        translated = translate_rekordbox_packet(
+            bytes(announcement), config, state, source_mac
+        )
+        normalizer = InitialDbserverResponseNormalizer(
+            state, config.preserve_rekordbox_device_id
+        )
+        response = b"\x11\x00\x00\x00\x01" + dbserver_message(1, 0x29)
+
+        self.assertEqual(translated[36], 0x29)
+        self.assertEqual(translated[38:44], config.usb_rekordbox_mac)
+        self.assertEqual(
+            translated[44:48], socket.inet_aton(config.usb_rekordbox_ip)
+        )
+        self.assertEqual(normalizer.feed(response), response)
 
     def test_broker_opens_dynamic_listener_before_returning_port(self):
         query_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

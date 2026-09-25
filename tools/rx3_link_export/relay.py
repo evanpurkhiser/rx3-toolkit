@@ -87,6 +87,7 @@ class RelayConfig:
     usb_rekordbox_mac: bytes
     lan_output_interface: str | None = None
     emulate_rx3: bool = False
+    preserve_rekordbox_device_id: bool = False
 
 
 @dataclass
@@ -167,8 +168,11 @@ def normalize_initial_dbserver_response(
 
 
 class InitialDbserverResponseNormalizer:
-    def __init__(self, state: RelayState) -> None:
+    def __init__(
+        self, state: RelayState, preserve_rekordbox_device_id: bool = False
+    ) -> None:
         self.state = state
+        self.preserve_rekordbox_device_id = preserve_rekordbox_device_id
         self.buffer = bytearray()
         self.greeting_remaining = 5
         self.complete = False
@@ -199,8 +203,12 @@ class InitialDbserverResponseNormalizer:
 
         message = bytes(self.buffer[:size])
         del self.buffer[:size]
-        normalized = normalize_initial_dbserver_response(
-            message, self.state.rekordbox_device_id
+        normalized = (
+            message
+            if self.preserve_rekordbox_device_id
+            else normalize_initial_dbserver_response(
+                message, self.state.rekordbox_device_id
+            )
         )
         if normalized != message:
             source_device_id = int.from_bytes(message[size - 4 : size], "big")
@@ -228,9 +236,14 @@ def recv_exact(connection: socket.socket, size: int) -> bytes:
 
 
 def proxy_connections(
-    client: socket.socket, upstream: socket.socket, state: RelayState
+    client: socket.socket,
+    upstream: socket.socket,
+    state: RelayState,
+    preserve_rekordbox_device_id: bool = False,
 ) -> None:
-    normalizer = InitialDbserverResponseNormalizer(state)
+    normalizer = InitialDbserverResponseNormalizer(
+        state, preserve_rekordbox_device_id
+    )
     sockets = (client, upstream)
     try:
         while True:
@@ -308,7 +321,12 @@ class DbServerBroker:
                 continue
             threading.Thread(
                 target=proxy_connections,
-                args=(client, upstream, self.state),
+                args=(
+                    client,
+                    upstream,
+                    self.state,
+                    self.config.preserve_rekordbox_device_id,
+                ),
                 daemon=True,
             ).start()
 
@@ -395,6 +413,30 @@ def translate_identity(
     translated = translate_addresses(data, source_ip, replacement_ip)
     if source_mac:
         translated = translated.replace(source_mac, replacement_mac)
+
+    return translated
+
+
+def translate_rekordbox_packet(
+    data: bytes,
+    config: RelayConfig,
+    state: RelayState,
+    source_mac: bytes | None,
+) -> bytes:
+    translated = translate_identity(
+        data,
+        config.rekordbox_ip,
+        config.usb_rekordbox_ip,
+        source_mac,
+        config.usb_rekordbox_mac,
+    )
+    if (
+        not config.preserve_rekordbox_device_id
+        and state.rekordbox_device_id is not None
+    ):
+        return normalize_rekordbox_device_id(
+            translated, state.rekordbox_device_id
+        )
 
     return translated
 
@@ -668,17 +710,9 @@ def relay_broadcasts(config: RelayConfig, state: RelayState | None = None) -> No
                     )
                 if data[10] == 0x06 and len(data) == 54:
                     state.rekordbox_device_id = data[36]
-                translated = translate_identity(
-                    data,
-                    config.rekordbox_ip,
-                    config.usb_rekordbox_ip,
-                    rekordbox_mac,
-                    config.usb_rekordbox_mac,
+                translated = translate_rekordbox_packet(
+                    data, config, state, rekordbox_mac
                 )
-                if state.rekordbox_device_id is not None:
-                    translated = normalize_rekordbox_device_id(
-                        translated, state.rekordbox_device_id
-                    )
                 if data[10] in (0x11, 0x31, 0x47):
                     print(
                         f"Rekordbox handshake {packet_type(data)} "
@@ -881,6 +915,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--midi-device")
     parser.add_argument("--without-midi", action="store_true")
     parser.add_argument("--emulate-rx3", action="store_true")
+    parser.add_argument(
+        "--preserve-rekordbox-device-id",
+        action="store_true",
+        help=(
+            "preserve rekordbox's LAN device ID in both Pro DJ Link UDP "
+            "packets and the initial dbserver response"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -903,6 +945,7 @@ def main() -> None:
         ),
         lan_output_interface=args.lan_output_interface,
         emulate_rx3=args.emulate_rx3,
+        preserve_rekordbox_device_id=args.preserve_rekordbox_device_id,
     )
     state = RelayState()
     if not args.without_midi:

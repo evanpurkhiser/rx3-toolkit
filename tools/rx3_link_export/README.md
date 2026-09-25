@@ -176,6 +176,43 @@ dbserver dynamic port ready: <runtime port>
 dbserver identity normalized: 0x29 -> 0x11
 ```
 
+### Experimental LAN identity mode
+
+The default relay behavior above remains the tested path. To test whether the
+RX3 accepts rekordbox's LAN personality consistently across both protocols,
+start the relay with `--preserve-rekordbox-device-id`:
+
+```sh
+python3 -m tools.rx3_link_export.relay \
+  --lan-output-interface rx3lan \
+  --usb-interface enp0s20f0u9u1c2 \
+  --rekordbox-ip 10.0.0.119 \
+  --midi-device /dev/snd/midiC0D0 \
+  --preserve-rekordbox-device-id
+```
+
+This single flag preserves the learned LAN device ID, normally `0x29`, in both
+the translated Pro DJ Link UDP packets and the first dbserver response. IP and
+MAC translation, the TCP broker, MIDI activation, and the routed NFS data path
+remain active. Keeping both identity surfaces together avoids the known mixed
+session where UDP registers device `0x11` but dbserver reports `0x29`.
+
+Use a cold session for the experiment: quit rekordbox, restart the relay, and
+restart or relaunch the RX3 application before enabling LINK. A successful
+SOURCE state should show peer ID `0x29`, a nonzero `pc_detect['29']` value, and
+the rekordbox computer in the rendered rows:
+
+```text
+pc_detect={'11': 0, '12': 0, '29': 1, '2A': 0, '2B': 0, '2C': 0}
+peer[0] id=41 flags=0x01 name='macbook-air'
+row[0] name='macbook-air'
+```
+
+The detect value may advance from `1` to `2` as the PC-backed media becomes
+ready. The relay should print the dynamic dbserver port without printing
+`dbserver identity normalized: 0x29 -> 0x11`. Select the source and open a
+track list to prove the preserved identity also passes the dbserver gate.
+
 The reliable cold-start order is:
 
 1. Boot the RX3 with the USB Link root-shell module and connect rear USB-B.
