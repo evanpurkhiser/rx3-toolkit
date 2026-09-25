@@ -1,23 +1,15 @@
 import socket
-import threading
 import unittest
 
 from tools.rx3_link_export.relay import (
     ACTIVATE_PC_CONTROL,
-    DBSERVER_QUERY,
     INITIALIZE_PC_CONTROL,
     PRO_DJ_LINK_MAGIC,
     RX3_IDLE_STATUS,
-    DbServerBroker,
-    InitialDbserverResponseNormalizer,
     RelayConfig,
-    RelayState,
     advertised_mac,
     advertised_ip,
-    dbserver_message_size,
     make_rx3_announcement,
-    normalize_rekordbox_device_id,
-    normalize_initial_dbserver_response,
     packet_type,
     rx3_claim_sequence,
     translate_addresses,
@@ -26,23 +18,7 @@ from tools.rx3_link_export.relay import (
 )
 
 
-def dbserver_message(*values: int) -> bytes:
-    argument_types = bytes([0x06] * len(values) + [0] * (12 - len(values)))
-    fields = [
-        b"\x11\x87\x23\x49\xae",
-        b"\x11\xff\xff\xff\xfe",
-        b"\x10\x40\x00",
-        bytes((0x0F, len(values))),
-        b"\x14\x00\x00\x00\x0c" + argument_types,
-    ]
-    fields.extend(b"\x11" + value.to_bytes(4, "big") for value in values)
-    return b"".join(fields)
-
-
-def test_config(
-    rekordbox_ip: str = "127.0.0.1",
-    preserve_rekordbox_device_id: bool = False,
-) -> RelayConfig:
+def test_config(rekordbox_ip: str = "127.0.0.1") -> RelayConfig:
     return RelayConfig(
         lan_interface="lan0",
         usb_interface="usb0",
@@ -54,60 +30,12 @@ def test_config(
         usb_broadcast="169.254.255.255",
         rx3_mac=bytes.fromhex("c83dfc16af99"),
         usb_rekordbox_mac=bytes.fromhex("c83dfc16af9a"),
-        preserve_rekordbox_device_id=preserve_rekordbox_device_id,
     )
 
 
 class RelayTests(unittest.TestCase):
-    def test_parses_complete_dbserver_message_across_partial_buffers(self):
-        message = dbserver_message(1, 0x29)
-
-        self.assertIsNone(dbserver_message_size(message[:-1]))
-        self.assertEqual(dbserver_message_size(message), len(message))
-
-    def test_normalizes_only_final_typed_integer_in_initial_response(self):
-        message = dbserver_message(0x29, 0x29)
-        subsequent_track_data = b"track\x11\x00\x00\x00\x29data"
-
-        normalized = normalize_initial_dbserver_response(
-            message + subsequent_track_data, 0x29
-        )
-
-        track_offset = -len(subsequent_track_data)
-        self.assertEqual(normalized[track_offset:], subsequent_track_data)
-        self.assertEqual(normalized[track_offset - 9 : track_offset - 5], b"\0\0\0\x29")
-        self.assertEqual(normalized[track_offset - 4 : track_offset], b"\0\0\0\x11")
-
-    def test_normalizes_lan_pc_identity_before_udp_identity_is_learned(self):
-        message = dbserver_message(1, 0x29)
-
-        self.assertEqual(
-            normalize_initial_dbserver_response(message, None),
-            dbserver_message(1, 0x11),
-        )
-        self.assertEqual(
-            normalize_initial_dbserver_response(dbserver_message(1, 0x11), None),
-            dbserver_message(1, 0x11),
-        )
-
-    def test_stream_normalizer_handles_fragmented_greeting_and_response_once(self):
-        state = RelayState(rekordbox_device_id=0x29)
-        normalizer = InitialDbserverResponseNormalizer(state)
-        message = dbserver_message(1, 0x29)
-        later = dbserver_message(2, 0x29)
-
-        chunks = [b"\x11\x00", b"\x00\x00\x01" + message[:11], message[11:] + later]
-        result = b"".join(normalizer.feed(chunk) for chunk in chunks)
-
-        expected = b"\x11\x00\x00\x00\x01" + dbserver_message(1, 0x11) + later
-        self.assertEqual(result, expected)
-
-    def test_preserves_lan_device_id_in_udp_and_dbserver_together(self):
-        config = test_config(
-            rekordbox_ip="10.0.0.119",
-            preserve_rekordbox_device_id=True,
-        )
-        state = RelayState(rekordbox_device_id=0x29)
+    def test_preserves_lan_rekordbox_identity_while_translating_endpoint(self):
+        config = test_config(rekordbox_ip="10.0.0.119")
         source_mac = bytes.fromhex("1c57dc3900bb")
         announcement = bytearray(PRO_DJ_LINK_MAGIC + b"\x06" + bytes(43))
         announcement[36] = 0x29
@@ -115,86 +43,13 @@ class RelayTests(unittest.TestCase):
         announcement[44:48] = socket.inet_aton(config.rekordbox_ip)
 
         translated = translate_rekordbox_packet(
-            bytes(announcement), config, state, source_mac
+            bytes(announcement), config, source_mac
         )
-        normalizer = InitialDbserverResponseNormalizer(
-            state, config.preserve_rekordbox_device_id
-        )
-        response = b"\x11\x00\x00\x00\x01" + dbserver_message(1, 0x29)
 
         self.assertEqual(translated[36], 0x29)
         self.assertEqual(translated[38:44], config.usb_rekordbox_mac)
         self.assertEqual(
             translated[44:48], socket.inet_aton(config.usb_rekordbox_ip)
-        )
-        self.assertEqual(normalizer.feed(response), response)
-
-    def test_broker_opens_dynamic_listener_before_returning_port(self):
-        query_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        query_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        query_listener.bind(("127.0.0.1", 0))
-        query_listener.listen()
-        query_port = query_listener.getsockname()[1]
-
-        dynamic_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        dynamic_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        dynamic_listener.bind(("127.0.0.1", 0))
-        dynamic_listener.listen()
-        dynamic_port = dynamic_listener.getsockname()[1]
-
-        response = dbserver_message(1, 0x29)
-        upstream_errors: list[BaseException] = []
-        upstream_peers: list[str] = []
-
-        def serve_query() -> None:
-            try:
-                connection, peer = query_listener.accept()
-                upstream_peers.append(peer[0])
-                with connection:
-                    self.assertEqual(
-                        connection.recv(len(DBSERVER_QUERY)), DBSERVER_QUERY
-                    )
-                    connection.sendall(dynamic_port.to_bytes(2, "big"))
-            except BaseException as error:
-                upstream_errors.append(error)
-
-        def serve_dynamic() -> None:
-            try:
-                connection, peer = dynamic_listener.accept()
-                upstream_peers.append(peer[0])
-                with connection:
-                    self.assertEqual(connection.recv(7), b"request")
-                    connection.sendall(b"\x11\x00\x00\x00\x01" + response)
-            except BaseException as error:
-                upstream_errors.append(error)
-
-        threading.Thread(target=serve_query, daemon=True).start()
-        threading.Thread(target=serve_dynamic, daemon=True).start()
-        broker = DbServerBroker(
-            test_config(), RelayState(rekordbox_device_id=0x29), query_port
-        )
-        threading.Thread(target=broker.serve, daemon=True).start()
-
-        with socket.create_connection(("127.0.0.2", query_port), timeout=2) as query:
-            query.sendall(DBSERVER_QUERY)
-            returned_port = int.from_bytes(query.recv(2), "big")
-        self.assertEqual(returned_port, dynamic_port)
-
-        with socket.create_connection(("127.0.0.2", returned_port), timeout=2) as data:
-            data.sendall(b"request")
-            expected_size = 5 + len(response)
-            received = bytearray()
-            while len(received) < expected_size:
-                received.extend(data.recv(expected_size - len(received)))
-
-        query_listener.close()
-        dynamic_listener.close()
-
-        self.assertFalse(upstream_errors)
-        self.assertEqual(upstream_peers, ["127.0.0.2", "127.0.0.2"])
-        self.assertEqual(
-            bytes(received),
-            b"\x11\x00\x00\x00\x01" + dbserver_message(1, 0x11),
         )
 
     def test_pc_control_messages_match_direct_usb_capture(self):
@@ -260,36 +115,6 @@ class RelayTests(unittest.TestCase):
         announcement[44:48] = socket.inet_aton("10.0.0.253")
 
         self.assertIsNone(advertised_ip(bytes(announcement)))
-
-    def test_normalizes_lan_rekordbox_announcement_device_id(self):
-        packet = PRO_DJ_LINK_MAGIC + b"\x06" + bytes(25) + b"\x29" + bytes(17)
-
-        normalized = normalize_rekordbox_device_id(packet, 0x29)
-
-        self.assertEqual(len(normalized), 54)
-        self.assertEqual(normalized[36], 0x11)
-
-    def test_normalizes_unicast_rekordbox_device_id_fields(self):
-        packet = bytearray(PRO_DJ_LINK_MAGIC + b"\x47" + bytes(61))
-        packet[33] = 0x29
-        packet[36] = 0x29
-
-        normalized = normalize_rekordbox_device_id(bytes(packet), 0x29)
-
-        self.assertEqual(normalized[33], 0x11)
-        self.assertEqual(normalized[36], 0x11)
-
-    def test_normalizes_remote_load_response_to_direct_usb_shape(self):
-        direct = bytes.fromhex(
-            "5173707431576d4a4f4c4772656b6f7264626f78000000000000000000000001"
-            "0111002411040000123456780000000101010301020200000000000000000000"
-            "0000000000000000"
-        )
-        lan = bytearray(direct)
-        lan[33] = 0x29
-        lan[36] = 0x29
-
-        self.assertEqual(normalize_rekordbox_device_id(bytes(lan), 0x29), direct)
 
     def test_reports_pro_dj_link_packet_type(self):
         self.assertEqual(packet_type(PRO_DJ_LINK_MAGIC + b"\x11payload"), "0x11")
@@ -357,4 +182,3 @@ class RelayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-    dbserver_message_size,

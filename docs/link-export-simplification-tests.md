@@ -92,9 +92,9 @@ Passing removes the dbserver parser, dynamic listeners, learned device-ID
 coupling, and listener lifetime state. On failure, compare the TCP source
 address and the interval between returning the port and the RX3's next SYN.
 
-Use `DBSERVER_TRANSPORT=nat` with `setup-nat.sh` and start `relay.py` with
-`--without-dbserver-broker`. The default broker mode remains available as the
-recovery path while the remaining topology assumptions are tested.
+This passing path is now the standard implementation. `setup-nat.sh` installs
+the TCP rules directly, and `relay.py` contains no dbserver parser, proxy, or
+dynamic listener.
 
 ### 3. Scope or remove MAC translation
 

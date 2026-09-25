@@ -17,8 +17,6 @@ from pathlib import Path
 
 PRO_DJ_LINK_MAGIC = b"Qspt1WmJOL"
 PRO_DJ_LINK_PORTS = (50000, 50001, 50002)
-DBSERVER_QUERY_PORT = 12523
-DBSERVER_QUERY = b"\x00\x00\x00\x0fRemoteDBServer\x00"
 IP_PKTINFO = 8
 ACTIVATE_PC_CONTROL = bytes.fromhex("f00040050000030d005001f7")
 INITIALIZE_PC_CONTROL = (
@@ -87,282 +85,6 @@ class RelayConfig:
     usb_rekordbox_mac: bytes
     lan_output_interface: str | None = None
     emulate_rx3: bool = False
-    preserve_rekordbox_device_id: bool = False
-
-
-@dataclass
-class RelayState:
-    rekordbox_device_id: int | None = None
-
-
-def typed_field_size(data: bytes, offset: int) -> int | None:
-    if offset >= len(data):
-        return None
-
-    kind = data[offset]
-    fixed_sizes = {0x0F: 2, 0x10: 3, 0x11: 5}
-    if kind in fixed_sizes:
-        return fixed_sizes[kind]
-    if kind not in (0x14, 0x26) or len(data) < offset + 5:
-        raise ValueError(f"invalid dbserver field type 0x{kind:02x}")
-
-    length = int.from_bytes(data[offset + 1 : offset + 5], "big")
-    return 5 + length * (2 if kind == 0x26 else 1)
-
-
-def dbserver_message_size(data: bytes) -> int | None:
-    offset = 0
-    for _ in range(4):
-        size = typed_field_size(data, offset)
-        if size is None or len(data) < offset + size:
-            return None
-        offset += size
-
-    arg_list_size = typed_field_size(data, offset)
-    if arg_list_size is None or len(data) < offset + arg_list_size:
-        return None
-    if data[offset] != 0x14:
-        raise ValueError("dbserver message argument list is not binary")
-
-    argument_count = data[14]
-    argument_types = data[offset + 5 : offset + arg_list_size]
-    offset += arg_list_size
-    field_types = {0x02: 0x26, 0x03: 0x14, 0x06: 0x11}
-    for index in range(argument_count):
-        if index >= len(argument_types) or argument_types[index] not in field_types:
-            raise ValueError("invalid dbserver argument type list")
-        expected_type = field_types[argument_types[index]]
-        if offset >= len(data):
-            return None
-        if data[offset] != expected_type:
-            raise ValueError("dbserver argument does not match its declared type")
-        size = typed_field_size(data, offset)
-        if size is None or len(data) < offset + size:
-            return None
-        offset += size
-
-    return offset
-
-
-def normalize_initial_dbserver_response(
-    data: bytes, source_device_id: int | None, device_id: int = 0x11
-) -> bytes:
-    size = dbserver_message_size(data)
-    if size is None:
-        raise ValueError("incomplete dbserver response")
-
-    normalized = bytearray(data)
-    final_field = size - 5
-    if final_field < 0 or normalized[final_field] != 0x11:
-        return data
-
-    response_device_id = int.from_bytes(normalized[final_field + 1 : size], "big")
-    is_learned_identity = response_device_id == source_device_id
-    is_lan_pc_identity = (
-        source_device_id is None and 0x29 <= response_device_id <= 0x2C
-    )
-    if is_learned_identity or is_lan_pc_identity:
-        normalized[final_field + 1 : size] = device_id.to_bytes(4, "big")
-
-    return bytes(normalized)
-
-
-class InitialDbserverResponseNormalizer:
-    def __init__(
-        self, state: RelayState, preserve_rekordbox_device_id: bool = False
-    ) -> None:
-        self.state = state
-        self.preserve_rekordbox_device_id = preserve_rekordbox_device_id
-        self.buffer = bytearray()
-        self.greeting_remaining = 5
-        self.complete = False
-
-    def feed(self, data: bytes) -> bytes:
-        if self.complete:
-            return data
-
-        self.buffer.extend(data)
-        output = bytearray()
-        if self.greeting_remaining:
-            count = min(self.greeting_remaining, len(self.buffer))
-            output.extend(self.buffer[:count])
-            del self.buffer[:count]
-            self.greeting_remaining -= count
-            if self.greeting_remaining:
-                return bytes(output)
-
-        try:
-            size = dbserver_message_size(self.buffer)
-        except ValueError:
-            self.complete = True
-            output.extend(self.buffer)
-            self.buffer.clear()
-            return bytes(output)
-        if size is None:
-            return bytes(output)
-
-        message = bytes(self.buffer[:size])
-        del self.buffer[:size]
-        normalized = (
-            message
-            if self.preserve_rekordbox_device_id
-            else normalize_initial_dbserver_response(
-                message, self.state.rekordbox_device_id
-            )
-        )
-        if normalized != message:
-            source_device_id = int.from_bytes(message[size - 4 : size], "big")
-            print(
-                f"dbserver identity normalized: 0x{source_device_id:02x} -> 0x11",
-                flush=True,
-            )
-        output.extend(normalized)
-        output.extend(self.buffer)
-        self.buffer.clear()
-        self.complete = True
-        return bytes(output)
-
-
-def recv_exact(connection: socket.socket, size: int) -> bytes:
-    chunks: list[bytes] = []
-    remaining = size
-    while remaining:
-        chunk = connection.recv(remaining)
-        if not chunk:
-            raise ConnectionError("connection closed before expected data arrived")
-        chunks.append(chunk)
-        remaining -= len(chunk)
-    return b"".join(chunks)
-
-
-def proxy_connections(
-    client: socket.socket,
-    upstream: socket.socket,
-    state: RelayState,
-    preserve_rekordbox_device_id: bool = False,
-) -> None:
-    normalizer = InitialDbserverResponseNormalizer(
-        state, preserve_rekordbox_device_id
-    )
-    sockets = (client, upstream)
-    try:
-        while True:
-            readable, _, _ = select.select(sockets, (), ())
-            for source in readable:
-                destination = upstream if source is client else client
-                data = source.recv(65536)
-                if not data:
-                    return
-                if source is upstream:
-                    data = normalizer.feed(data)
-                if data:
-                    destination.sendall(data)
-    finally:
-        client.close()
-        upstream.close()
-
-
-class DbServerBroker:
-    def __init__(
-        self,
-        config: RelayConfig,
-        state: RelayState,
-        query_port: int = DBSERVER_QUERY_PORT,
-    ) -> None:
-        self.config = config
-        self.state = state
-        self.query_port = query_port
-        self.dynamic_listeners: dict[int, socket.socket] = {}
-        self.lock = threading.Lock()
-
-    def make_tcp_listener(self, port: int) -> socket.socket:
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind((self.config.usb_rekordbox_ip, port))
-        listener.listen()
-        return listener
-
-    def connect_upstream(self, port: int) -> socket.socket:
-        connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            if self.config.lan_output_interface:
-                connection.setsockopt(
-                    socket.SOL_SOCKET,
-                    socket.SO_BINDTODEVICE,
-                    self.config.lan_output_interface.encode() + b"\0",
-                )
-            connection.bind((self.config.lan_rx3_ip, 0))
-            connection.connect((self.config.rekordbox_ip, port))
-            return connection
-        except BaseException:
-            connection.close()
-            raise
-
-    def ensure_dynamic_listener(self, port: int) -> None:
-        with self.lock:
-            if port in self.dynamic_listeners:
-                return
-            listener = self.make_tcp_listener(port)
-            self.dynamic_listeners[port] = listener
-
-        threading.Thread(
-            target=self.serve_dynamic_port,
-            args=(port, listener),
-            daemon=True,
-        ).start()
-
-    def serve_dynamic_port(self, port: int, listener: socket.socket) -> None:
-        while True:
-            client, _ = listener.accept()
-            try:
-                upstream = self.connect_upstream(port)
-            except OSError:
-                client.close()
-                continue
-            threading.Thread(
-                target=proxy_connections,
-                args=(
-                    client,
-                    upstream,
-                    self.state,
-                    self.config.preserve_rekordbox_device_id,
-                ),
-                daemon=True,
-            ).start()
-
-    def handle_query(self, client: socket.socket) -> None:
-        try:
-            with self.connect_upstream(self.query_port) as upstream:
-                header = recv_exact(client, 4)
-                length = int.from_bytes(header, "big")
-                request = header + recv_exact(client, length)
-                if request != DBSERVER_QUERY:
-                    raise ValueError("unexpected dbserver port query")
-                upstream.sendall(request)
-                response = recv_exact(upstream, 2)
-
-            port = int.from_bytes(response, "big")
-            if port not in (0, 0xFFFF):
-                self.ensure_dynamic_listener(port)
-                print(f"dbserver dynamic port ready: {port}", flush=True)
-            client.sendall(response)
-        except (ConnectionError, OSError, ValueError) as error:
-            print(f"dbserver query failed: {error}", flush=True)
-        finally:
-            client.close()
-
-    def serve(self) -> None:
-        listener = self.make_tcp_listener(self.query_port)
-        print(
-            f"dbserver broker ready: {self.config.usb_rekordbox_ip}:"
-            f"{self.query_port} -> {self.config.rekordbox_ip}",
-            flush=True,
-        )
-        while True:
-            client, _ = listener.accept()
-            threading.Thread(
-                target=self.handle_query, args=(client,), daemon=True
-            ).start()
 
 
 def translate_addresses(data: bytes, source: str, replacement: str) -> bytes:
@@ -420,44 +142,15 @@ def translate_identity(
 def translate_rekordbox_packet(
     data: bytes,
     config: RelayConfig,
-    state: RelayState,
     source_mac: bytes | None,
 ) -> bytes:
-    translated = translate_identity(
+    return translate_identity(
         data,
         config.rekordbox_ip,
         config.usb_rekordbox_ip,
         source_mac,
         config.usb_rekordbox_mac,
     )
-    if (
-        not config.preserve_rekordbox_device_id
-        and state.rekordbox_device_id is not None
-    ):
-        return normalize_rekordbox_device_id(
-            translated, state.rekordbox_device_id
-        )
-
-    return translated
-
-
-def normalize_rekordbox_device_id(
-    data: bytes, source_device_id: int, device_id: int = 0x11
-) -> bytes:
-    if not data.startswith(PRO_DJ_LINK_MAGIC) or len(data) < 37:
-        return data
-
-    normalized = bytearray(data)
-    if normalized[33] == source_device_id:
-        normalized[33] = device_id
-
-    kind = normalized[10]
-    if kind == 0x06 and len(normalized) == 54:
-        normalized[36] = device_id
-    elif kind in (0x11, 0x29, 0x47) and normalized[36] == source_device_id:
-        normalized[36] = device_id
-
-    return bytes(normalized)
 
 
 def packet_type(data: bytes) -> str:
@@ -586,8 +279,7 @@ def interface_mac(name: str) -> bytes:
     return bytes.fromhex(value.replace(":", ""))
 
 
-def relay_broadcasts(config: RelayConfig, state: RelayState | None = None) -> None:
-    state = state or RelayState()
+def relay_broadcasts(config: RelayConfig) -> None:
     listeners = {make_listener(port): port for port in PRO_DJ_LINK_PORTS}
     lan_output_interface = config.lan_output_interface or config.lan_interface
     lan_index = interface_index(config.lan_interface)
@@ -708,10 +400,8 @@ def relay_broadcasts(config: RelayConfig, state: RelayState | None = None) -> No
                         f"{config.usb_rekordbox_mac.hex(':')}",
                         flush=True,
                     )
-                if data[10] == 0x06 and len(data) == 54:
-                    state.rekordbox_device_id = data[36]
                 translated = translate_rekordbox_packet(
-                    data, config, state, rekordbox_mac
+                    data, config, rekordbox_mac
                 )
                 if data[10] in (0x11, 0x31, 0x47):
                     print(
@@ -914,20 +604,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--usb-rekordbox-mac")
     parser.add_argument("--midi-device")
     parser.add_argument("--without-midi", action="store_true")
-    parser.add_argument(
-        "--without-dbserver-broker",
-        action="store_true",
-        help="leave dbserver TCP transport to kernel forwarding and NAT",
-    )
     parser.add_argument("--emulate-rx3", action="store_true")
-    parser.add_argument(
-        "--preserve-rekordbox-device-id",
-        action="store_true",
-        help=(
-            "preserve rekordbox's LAN device ID in both Pro DJ Link UDP "
-            "packets and the initial dbserver response"
-        ),
-    )
     return parser.parse_args()
 
 
@@ -950,23 +627,14 @@ def main() -> None:
         ),
         lan_output_interface=args.lan_output_interface,
         emulate_rx3=args.emulate_rx3,
-        preserve_rekordbox_device_id=args.preserve_rekordbox_device_id,
     )
-    state = RelayState()
     if not args.without_midi:
         threading.Thread(
             target=maintain_pc_control,
             args=(args.midi_device,),
             daemon=True,
         ).start()
-    if args.without_dbserver_broker:
-        print("dbserver transport: kernel NAT", flush=True)
-    else:
-        threading.Thread(
-            target=DbServerBroker(config, state).serve,
-            daemon=True,
-        ).start()
-    relay_broadcasts(config, state)
+    relay_broadcasts(config)
 
 
 if __name__ == "__main__":
