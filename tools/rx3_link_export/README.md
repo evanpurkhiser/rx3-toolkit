@@ -37,11 +37,6 @@ firmware-guarded preload for that case. It calls the stock
 the mixer key map, starts MIDI reception, and lets `NetworkMonitor` observe the
 normal mounted flag on its own timer.
 
-The diagnostic `--emulate-rx3` mode can repeat the byte-for-byte stock type
-`0x06` announcement recovered from a direct session, substituting only the
-routed LAN address and configured RX3 MAC. Normal relay operation leaves this
-mode disabled.
-
 ## Tested server topology
 
 ```text

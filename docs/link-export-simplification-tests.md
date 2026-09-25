@@ -150,12 +150,11 @@ The live bootstrap log shows that the current preload invoked the stock mounted
 callback and then resumed both Discovery and Connecting from LinkStop. That is
 evidence those calls are active today, not proof that they are irreducible.
 
-## Low-risk code removal
+## Relay receive gate
 
-The successful relay runs with `--emulate-rx3` disabled. Its synthetic claim,
-status, fallback-announcement, and operating-transition machinery never belongs
-to the normal path. Remove it after a baseline capture or move it into a
-separate replay diagnostic so production behavior cannot activate it.
+The relay contains no synthetic claim, status, fallback-announcement, or
+operating-transition machinery. Stock RX3 packets drive every successful
+session.
 
 The `rx3_announced` receive gate is also suspect. Stock peers retry their
 announcements, and forwarding early Rekordbox packets may be safer than dropping

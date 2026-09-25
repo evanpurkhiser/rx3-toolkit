@@ -25,51 +25,6 @@ INITIALIZE_PC_CONTROL = (
         "f07e7f0d7002351107617f7f7f7f11000001000100020000001c0000010000f7"
     ),
 )
-STOCK_RX3_ANNOUNCEMENT = bytes.fromhex(
-    "5173707431576d4a4f4c060058444a2d5258330000000000000000000000000001"
-    "0300360b02c83dfc16af99a9feaf99010000000700"
-)
-RX3_IDLE_STATUS = (
-    bytes.fromhex(
-        "5173707431576d4a4f4c0a58444a2d5258330000000000000000000000000001"
-        "050b01000b000100000000000000000000000000000000000000000000000000"
-        "0000000000000000000000000000000000000000000000000000000000000000"
-        "0000000000000000010000000000000400000000000000000000000000000000"
-        "00000000000000000080009e001000007fffffff8000ffff00000000000000ff"
-        "ffffffff01ff0000000000000000000000000000000001000000000000000000"
-        "0000000000000000000000001f01000000000000000000000100000000000000"
-        "0000000000000000000000000000000012345678000000010101010101010000"
-        "0000000000000000000000000000000000000000000000000000000000000000"
-        "00000000"
-    ),
-    bytes.fromhex(
-        "5173707431576d4a4f4c0a58444a2d5258330000000000000000000000000001"
-        "050c01000c000100000000000000000000000000000000000000000000000000"
-        "0000000000000000000000000000000000000000000000000000000000000000"
-        "0000000000000000000000000000000400000000000000000000000000000000"
-        "00000000000000000080009e001000007fffffff8000ffff00000000000000ff"
-        "ffffffff01ff0000000000000000000000000000000001000000000000000000"
-        "0000000000000000000000001f01000000000000000000000100000000000000"
-        "0000000000000000000000000000000000000000000000000100000000000000"
-        "0000000000000000000000000000000000000000000000000000000000000000"
-        "00000000"
-    ),
-)
-RX3_OPERATING_TRANSITION = (
-    bytes.fromhex(
-        "5173707431576d4a4f4c3058444a2d5258330000000000000000000000000001"
-        "030b0000"
-    ),
-    bytes.fromhex(
-        "5173707431576d4a4f4c1058444a2d5258330000000000000000000000000001"
-        "000b0000"
-    ),
-    bytes.fromhex(
-        "5173707431576d4a4f4c4658444a2d5258330000000000000000000000000001"
-        "000b00040b040000"
-    ),
-)
-
 
 @dataclass(frozen=True)
 class RelayConfig:
@@ -81,10 +36,8 @@ class RelayConfig:
     usb_rekordbox_ip: str
     lan_broadcast: str
     usb_broadcast: str
-    rx3_mac: bytes
     usb_rekordbox_mac: bytes
     lan_output_interface: str | None = None
-    emulate_rx3: bool = False
 
 
 def translate_addresses(data: bytes, source: str, replacement: str) -> bytes:
@@ -159,64 +112,6 @@ def packet_type(data: bytes) -> str:
     return "unknown"
 
 
-def make_rx3_announcement(config: RelayConfig) -> bytes:
-    announcement = bytearray(STOCK_RX3_ANNOUNCEMENT)
-    announcement[38:44] = config.rx3_mac
-    announcement[44:48] = socket.inet_aton(config.lan_rx3_ip)
-    return bytes(announcement)
-
-
-def make_discovery_packet(kind: int, payload: bytes) -> bytes:
-    name = b"XDJ-RX3" + bytes(13)
-    size = 36 + len(payload)
-    return b"".join(
-        (
-            PRO_DJ_LINK_MAGIC,
-            bytes((kind, 0)),
-            name,
-            b"\x01\x03",
-            size.to_bytes(2, "big"),
-            payload,
-        )
-    )
-
-
-def rx3_claim_sequence(config: RelayConfig) -> list[tuple[float, bytes]]:
-    events: list[tuple[float, bytes]] = []
-    for index in range(3):
-        events.append((index * 0.3, make_discovery_packet(0x0A, b"\x07")))
-        events.append(
-            (
-                1.0 + index * 0.3,
-                make_discovery_packet(
-                    0x00, bytes((index + 1, 7)) + config.rx3_mac
-                ),
-            )
-        )
-
-    offset = 2.0
-    for candidate in (0x0B, 0x01, 0x02, 0x03, 0x04, 0x21):
-        for counter in range(1, 4):
-            payload = b"".join(
-                (
-                    socket.inet_aton(config.lan_rx3_ip),
-                    config.rx3_mac,
-                    bytes((candidate, counter, 7, 2)),
-                )
-            )
-            events.append((offset, make_discovery_packet(0x02, payload)))
-            offset += 0.3
-
-    for index in range(3):
-        events.append(
-            (
-                7.5 + index * 0.3,
-                make_discovery_packet(0x04, bytes((0x0B, index + 1))),
-            )
-        )
-    return sorted(events)
-
-
 def packet_context(
     ancillary: list[tuple[int, int, bytes]],
 ) -> tuple[int, str]:
@@ -285,22 +180,9 @@ def relay_broadcasts(config: RelayConfig) -> None:
     lan_index = interface_index(config.lan_interface)
     lan_output_index = interface_index(lan_output_interface)
     usb_index = interface_index(config.usb_interface)
-    fallback_announcement = make_rx3_announcement(config)
-    sequence_started = time.monotonic() + 0.5
-    claim_events = (
-        [
-            (sequence_started + delay, packet)
-            for delay, packet in rx3_claim_sequence(config)
-        ]
-        if config.emulate_rx3
-        else []
-    )
-    operating_transition_sent = False
     rx3_announced = False
     rekordbox_mac: bytes | None = None
     rx3_advertised_ip: str | None = None
-    next_status: float | None = None
-    next_fallback = sequence_started + 10.2 if config.emulate_rx3 else None
     rx3_ip = config.rx3_ip
 
     print(
@@ -310,7 +192,6 @@ def relay_broadcasts(config: RelayConfig) -> None:
     )
 
     while True:
-        now = time.monotonic()
         current_lan_index = interface_index(config.lan_interface)
         current_lan_output_index = interface_index(lan_output_interface)
         current_usb_index = interface_index(config.usb_interface)
@@ -337,45 +218,6 @@ def relay_broadcasts(config: RelayConfig) -> None:
                 f"{config.usb_interface}={usb_index}",
                 flush=True,
             )
-
-        while claim_events and now >= claim_events[0][0]:
-            _, packet = claim_events.pop(0)
-            send_broadcast(
-                packet,
-                lan_output_interface,
-                config.lan_rx3_ip,
-                config.lan_broadcast,
-                50000,
-            )
-
-        if next_status is not None and now >= next_status:
-            send_broadcast(
-                RX3_IDLE_STATUS[0],
-                lan_output_interface,
-                config.lan_rx3_ip,
-                config.lan_broadcast,
-                50002,
-            )
-            time.sleep(0.008)
-            send_broadcast(
-                RX3_IDLE_STATUS[1],
-                lan_output_interface,
-                config.lan_rx3_ip,
-                config.lan_broadcast,
-                50002,
-            )
-            next_status = now + 0.214
-
-        if next_fallback is not None and now >= next_fallback:
-            send_broadcast(
-                fallback_announcement,
-                lan_output_interface,
-                config.lan_rx3_ip,
-                config.lan_broadcast,
-                50000,
-            )
-            rx3_announced = True
-            next_fallback = now + 2.0
 
         readable, _, _ = select.select(listeners, (), (), 0.5)
         for listener in readable:
@@ -426,58 +268,6 @@ def relay_broadcasts(config: RelayConfig) -> None:
                 except OSError:
                     continue
                 direction = "rekordbox->rx3"
-                kind = data[10]
-                if (
-                    config.emulate_rx3
-                    and kind == 0x06
-                    and rx3_announced
-                    and not operating_transition_sent
-                ):
-                    send_broadcast(
-                        RX3_OPERATING_TRANSITION[0],
-                        lan_output_interface,
-                        config.lan_rx3_ip,
-                        config.lan_broadcast,
-                        50002,
-                    )
-                    time.sleep(0.015)
-                    send_broadcast(
-                        RX3_OPERATING_TRANSITION[1],
-                        lan_output_interface,
-                        config.lan_rx3_ip,
-                        config.lan_broadcast,
-                        50002,
-                    )
-                    time.sleep(0.002)
-                    send_broadcast(
-                        RX3_IDLE_STATUS[0],
-                        lan_output_interface,
-                        config.lan_rx3_ip,
-                        config.lan_broadcast,
-                        50002,
-                    )
-                    time.sleep(0.008)
-                    send_broadcast(
-                        RX3_IDLE_STATUS[1],
-                        lan_output_interface,
-                        config.lan_rx3_ip,
-                        config.lan_broadcast,
-                        50002,
-                    )
-                    time.sleep(0.007)
-                    send_broadcast(
-                        RX3_OPERATING_TRANSITION[2],
-                        lan_output_interface,
-                        config.lan_rx3_ip,
-                        config.lan_broadcast,
-                        50002,
-                    )
-                    operating_transition_sent = True
-                    next_status = time.monotonic() + 0.183
-                    print(
-                        "rekordbox claim complete; RX3 operating stream started",
-                        flush=True,
-                    )
             elif (
                 interface == usb_index
                 and peer[0].startswith("169.254.")
@@ -600,11 +390,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--usb-rekordbox-ip", default="169.254.100.1")
     parser.add_argument("--lan-broadcast", default="10.0.0.255")
     parser.add_argument("--usb-broadcast", default="169.254.255.255")
-    parser.add_argument("--rx3-mac", default="c8:3d:fc:16:af:99")
     parser.add_argument("--usb-rekordbox-mac")
     parser.add_argument("--midi-device")
     parser.add_argument("--without-midi", action="store_true")
-    parser.add_argument("--emulate-rx3", action="store_true")
     return parser.parse_args()
 
 
@@ -619,14 +407,12 @@ def main() -> None:
         usb_rekordbox_ip=args.usb_rekordbox_ip,
         lan_broadcast=args.lan_broadcast,
         usb_broadcast=args.usb_broadcast,
-        rx3_mac=bytes.fromhex(args.rx3_mac.replace(":", "")),
         usb_rekordbox_mac=(
             bytes.fromhex(args.usb_rekordbox_mac.replace(":", ""))
             if args.usb_rekordbox_mac
             else interface_mac(args.usb_interface)
         ),
         lan_output_interface=args.lan_output_interface,
-        emulate_rx3=args.emulate_rx3,
     )
     if not args.without_midi:
         threading.Thread(

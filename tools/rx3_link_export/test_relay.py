@@ -5,13 +5,10 @@ from tools.rx3_link_export.relay import (
     ACTIVATE_PC_CONTROL,
     INITIALIZE_PC_CONTROL,
     PRO_DJ_LINK_MAGIC,
-    RX3_IDLE_STATUS,
     RelayConfig,
     advertised_mac,
     advertised_ip,
-    make_rx3_announcement,
     packet_type,
-    rx3_claim_sequence,
     translate_addresses,
     translate_identity,
     translate_rekordbox_packet,
@@ -28,7 +25,6 @@ def test_config(rekordbox_ip: str = "127.0.0.1") -> RelayConfig:
         usb_rekordbox_ip="127.0.0.2",
         lan_broadcast="10.0.0.255",
         usb_broadcast="169.254.255.255",
-        rx3_mac=bytes.fromhex("c83dfc16af99"),
         usb_rekordbox_mac=bytes.fromhex("c83dfc16af9a"),
     )
 
@@ -119,65 +115,9 @@ class RelayTests(unittest.TestCase):
     def test_reports_pro_dj_link_packet_type(self):
         self.assertEqual(packet_type(PRO_DJ_LINK_MAGIC + b"\x11payload"), "0x11")
 
-    def test_status_packet_name_immediately_follows_type(self):
-        packet = RX3_IDLE_STATUS[0]
-
-        self.assertEqual(packet_type(packet), "0x0a")
-        self.assertEqual(packet[11:31].rstrip(b"\0"), b"XDJ-RX3")
-
     def test_rejects_other_payloads(self):
         self.assertEqual(packet_type(b"not pro dj link"), "unknown")
 
-    def test_fallback_announcement_matches_captured_stock_fields(self):
-        config = RelayConfig(
-            lan_interface="lan0",
-            usb_interface="usb0",
-            rekordbox_ip="10.0.0.119",
-            rx3_ip="169.254.175.153",
-            lan_rx3_ip="10.0.0.253",
-            usb_rekordbox_ip="169.254.100.1",
-            lan_broadcast="10.0.0.255",
-            usb_broadcast="169.254.255.255",
-            rx3_mac=bytes.fromhex("c83dfc16af99"),
-            usb_rekordbox_mac=bytes.fromhex("c83dfc16af9a"),
-        )
-
-        announcement = make_rx3_announcement(config)
-
-        self.assertEqual(len(announcement), 54)
-        self.assertEqual(packet_type(announcement), "0x06")
-        self.assertEqual(announcement[36:38], bytes.fromhex("0b02"))
-        self.assertEqual(announcement[38:44], config.rx3_mac)
-        self.assertEqual(announcement[44:48], socket.inet_aton("10.0.0.253"))
-        self.assertEqual(announcement[52], 7)
-
-    def test_claim_sequence_matches_stock_packet_shapes(self):
-        config = RelayConfig(
-            lan_interface="lan0",
-            usb_interface="usb0",
-            rekordbox_ip="10.0.0.119",
-            rx3_ip="169.254.175.153",
-            lan_rx3_ip="10.0.0.253",
-            usb_rekordbox_ip="169.254.100.1",
-            lan_broadcast="10.0.0.255",
-            usb_broadcast="169.254.255.255",
-            rx3_mac=bytes.fromhex("c83dfc16af99"),
-            usb_rekordbox_mac=bytes.fromhex("c83dfc16af9a"),
-        )
-
-        events = rx3_claim_sequence(config)
-        shapes = [(packet_type(packet), len(packet)) for _, packet in events]
-
-        self.assertEqual(shapes[:6], [("0x0a", 37)] * 3 + [("0x00", 44)] * 3)
-        self.assertEqual(shapes[6:24], [("0x02", 50)] * 18)
-        self.assertEqual(shapes[24:], [("0x04", 38)] * 3)
-        for _, packet in events[6:24]:
-            self.assertEqual(packet[36:40], socket.inet_aton("10.0.0.253"))
-
-    def test_idle_status_packets_match_captured_lengths_and_decks(self):
-        self.assertEqual([len(packet) for packet in RX3_IDLE_STATUS], [292, 292])
-        self.assertEqual([packet[32] for packet in RX3_IDLE_STATUS], [5, 5])
-        self.assertEqual([packet[33] for packet in RX3_IDLE_STATUS], [11, 12])
 
 
 if __name__ == "__main__":
