@@ -387,6 +387,7 @@ Want one of these sooner? Or something else? Say so in an issue, or build it you
 | [Getting the RX3 filesystem](docs/extract-initramfs.md) | Getting a Linux filesystem out of the published GPL sources |
 | [Troubleshooting](docs/troubleshooting.md) | Symptoms, errors, fixes |
 | [Reference](REFERENCES.md) | How it all works: the platform, patching, the display, stems, the build, everything |
+| [Link Export research](docs/link-export-1.19.md) | Successful Wi-Fi-to-USB server relay and protocol findings |
 | [Contributing](CONTRIBUTING.md) | Build from source, run the tests, write a module |
 | [Legal position](LEGAL.md) | What this project does, what it does not distribute, and on what basis |
 | [Changelog](CHANGELOG.md) | What changed |
