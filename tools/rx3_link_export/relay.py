@@ -914,6 +914,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--usb-rekordbox-mac")
     parser.add_argument("--midi-device")
     parser.add_argument("--without-midi", action="store_true")
+    parser.add_argument(
+        "--without-dbserver-broker",
+        action="store_true",
+        help="leave dbserver TCP transport to kernel forwarding and NAT",
+    )
     parser.add_argument("--emulate-rx3", action="store_true")
     parser.add_argument(
         "--preserve-rekordbox-device-id",
@@ -954,10 +959,13 @@ def main() -> None:
             args=(args.midi_device,),
             daemon=True,
         ).start()
-    threading.Thread(
-        target=DbServerBroker(config, state).serve,
-        daemon=True,
-    ).start()
+    if args.without_dbserver_broker:
+        print("dbserver transport: kernel NAT", flush=True)
+    else:
+        threading.Thread(
+            target=DbServerBroker(config, state).serve,
+            daemon=True,
+        ).start()
     relay_broadcasts(config, state)
 
 

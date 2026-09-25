@@ -77,6 +77,12 @@ therefore expected for a transparent bridge carrying Rekordbox's LAN identity.
 
 ### 2. Replace the TCP broker with one-to-one NAT
 
+**Result: passed on firmware 1.19.** The RX3 connected through conntrack to
+Rekordbox on port `12523`, received dynamic port `65122`, then opened that port
+and browsed normally. The capture shows each RX3-side TCP segment translated to
+the corresponding LAN segment in both directions. No process listened on port
+`12523` or the dynamic port, and the relay never parsed either stream.
+
 Only attempt this after the coherent `0x29` session passes. Route TCP in both
 directions with the same virtual endpoint mapping used by UDP. Port 12523
 returns the runtime dbserver port unchanged, and conntrack routes the subsequent
@@ -85,6 +91,10 @@ connection without parsing its stream.
 Passing removes the dbserver parser, dynamic listeners, learned device-ID
 coupling, and listener lifetime state. On failure, compare the TCP source
 address and the interval between returning the port and the RX3's next SYN.
+
+Use `DBSERVER_TRANSPORT=nat` with `setup-nat.sh` and start `relay.py` with
+`--without-dbserver-broker`. The default broker mode remains available as the
+recovery path while the remaining topology assumptions are tested.
 
 ### 3. Scope or remove MAC translation
 

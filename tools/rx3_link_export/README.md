@@ -22,6 +22,11 @@ dbserver identity at `0x29`. Later library messages pass through byte-for-byte.
 NFS, and other unicast UDP traffic through conntrack. The relay also maintains
 the stock USB-MIDI PC-control gate.
 
+The tested kernel-NAT mode also routes dbserver TCP without parsing it. Port
+`12523` returns Rekordbox's dynamic port unchanged, and conntrack forwards the
+RX3's following connection to that port. The userspace broker remains as a
+compatibility and diagnostic mode.
+
 The LAN-facing RX3 address belongs to a macvlan interface. `setup-nat.sh` puts
 the relay interfaces in loose reverse-path-filter mode because replies from the
 rekordbox computer enter `rx3lan` even though their reverse route uses `lan0`.
@@ -98,14 +103,18 @@ both pass; mixed identities fail.
 | Traffic | Server path | Translation |
 | --- | --- | --- |
 | UDP 50000-50002 | `relay.py` sockets | IPs and MACs; optional rekordbox `0x29`/`0x11` identity |
-| TCP 12523 | local dbserver broker | returned port is preserved |
-| Runtime dbserver TCP | local dynamic broker listener | final `UInt32` in first response only |
+| TCP 12523 | dbserver broker or kernel NAT | returned port is preserved |
+| Runtime dbserver TCP | dynamic broker listener or kernel NAT | optional first-response identity translation in broker mode |
 | RPC, mountd, NFSv2 UDP | nftables DNAT/SNAT | IP headers only |
 | Fragmented NFS replies | kernel forwarding/conntrack | fragments remain in the kernel data plane |
 | USB MIDI | raw ALSA MIDI device | captured initialization and activation SysEx |
 
 The dynamic dbserver port and mountd port change between sessions. No rule or
 configuration should hardcode the observed `63092` and `57929` examples.
+
+With `DBSERVER_TRANSPORT=nat` and `--without-dbserver-broker`, both TCP rows
+above use nftables and conntrack instead. There is no payload translation or
+userspace listener in that mode.
 
 ## RX3-side prerequisite
 
@@ -166,6 +175,24 @@ systemd-run --user --collect --unit=codex-rx3-link-export \
     --usb-interface enp0s20f0u9u1c2 \
     --rekordbox-ip 10.0.0.119 \
     --midi-device /dev/snd/midiC0D0
+```
+
+The simpler, tested dbserver path uses kernel NAT:
+
+```sh
+sudo env \
+  USB_INTERFACE=enp0s20f0u9u1c2 \
+  REKORDBOX_IP=10.0.0.119 \
+  DBSERVER_TRANSPORT=nat \
+  tools/rx3_link_export/setup-nat.sh
+
+python3 -m tools.rx3_link_export.relay \
+  --lan-output-interface rx3lan \
+  --usb-interface enp0s20f0u9u1c2 \
+  --rekordbox-ip 10.0.0.119 \
+  --midi-device /dev/snd/midiC0D0 \
+  --preserve-rekordbox-device-id \
+  --without-dbserver-broker
 ```
 
 Start rekordbox Export mode. The RX3 announcement should make the **LINK**
