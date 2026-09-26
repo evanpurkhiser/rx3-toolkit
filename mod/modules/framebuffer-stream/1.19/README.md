@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
-# Framebuffer stream prototype
+# Framebuffer stream
 
-This module streams `/dev/fb0` over the rear USB-B Link Export network. It
+This module streams `/dev/fb0` over any configured RX3 network interface. It
 queries the active resolution, stride, bit depth, color bitfields, and visible
-offset at runtime. The default endpoint is `169.254.100.2:7351`.
+offset at runtime. It listens on TCP port 7351; the validated rear USB-B Link
+Export endpoint is `169.254.100.2:7351`. Network setup is intentionally outside
+this module so it can also run over a configured USB Wi-Fi interface.
 
 The first frame sent to a client is a complete keyframe. Later frames encode
 the full-frame RGB565 XOR as skip/literal runs and compress those runs with a
@@ -46,5 +48,5 @@ little-endian RGB565 XOR value per pixel. Runs may stop at framebuffer row
 boundaries. Codec two uses the standard raw LZ4 block format. Codec three
 applies a standard zlib wrapper to the whole RLE byte stream.
 
-This is a proof of concept. It reads the physical framebuffer asynchronously,
-so a tile can contain tearing if the display changes while its rows are copied.
+The stream reads the physical framebuffer asynchronously, so a rectangle can
+contain tearing if the display changes while its rows are copied.

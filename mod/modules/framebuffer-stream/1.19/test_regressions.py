@@ -8,9 +8,9 @@ ROOT = pathlib.Path(__file__).parent
 
 
 class FramebufferStreamGuards(unittest.TestCase):
-    def test_manifest_loads_after_usb_link_shell(self):
+    def test_manifest_is_transport_independent(self):
         manifest = json.loads((ROOT / "manifest.json").read_text())
-        self.assertEqual(manifest["requires"], ["usb-link-root-shell"])
+        self.assertEqual(manifest["requires"], [])
         self.assertGreater(manifest["order"], 91)
 
     def test_protocol_and_backpressure_guards_are_present(self):

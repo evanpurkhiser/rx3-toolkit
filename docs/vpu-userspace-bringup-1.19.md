@@ -29,8 +29,7 @@ https://www.pioneerdj.com/-/media/pioneerdj/downloads/opensource-code/gnu/xdj-rx
 ```
 
 Those asset URLs currently redirect to the new AlphaTheta support site and
-return HTTP 403. None of the packages were present under `/home/evan` before
-this investigation.
+return HTTP 403.
 
 The matching sources remain available from the Gateworks Freescale package
 mirror. The 3.10.17 package has the same 5.4.23 library named by the 3.0.101
@@ -82,8 +81,8 @@ The vendor `mxc_vpu_test` links `libvpu`, `libipu`, `librt`, and libpthread
 because one binary includes capture, display, loopback, and transcoding.
 A file-to-VPU one-frame program does not need `libipu` or `librt`: the VPU
 driver allocates and maps the input, reference, work, and bitstream buffers.
-The later framebuffer streamer will use `libipu` or direct `/dev/mxc_ipu`
-ioctls to scale and convert RGB565 to YUV420.
+The continuous framebuffer streamer uses direct `/dev/mxc_ipu` ioctls to scale
+and convert RGB565 to YUV420.
 
 ## Smallest encoder validation
 
@@ -128,5 +127,5 @@ Baseline level 3.0 IDR frame. The VPU reported 40.12 encoder frames per second
 and 30.78 aggregate frames per second for the one-frame file test. The encoded
 access unit was 12,451 bytes and contained SPS, PPS, and IDR NAL units.
 
-The remaining implementation work is a persistent capture and encode loop plus
-browser transport. The hardware stack itself is validated on the RX3.
+The continuous streamer and WebCodecs browser relay build on this validated
+hardware stack; see [the hardware streaming guide](hardware-video-encoding-1.19.md).

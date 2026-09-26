@@ -10,16 +10,15 @@ Open an `ffplay` window on the receiving machine:
 python3 -m tools.rx3_framebuffer.cli
 ```
 
-Run a browser viewer on Evan's server:
+Run the browser viewer:
 
 ```sh
 python3 -m tools.rx3_framebuffer.cli --no-display --web-port 7352
 ```
 
-The server binds only to `127.0.0.1`. Tailnet nginx publishes it at
-<https://7352.prk.network/>. The page uses a native WebSocket and canvas and
-downloads no dependencies. A viewer that joins an active stream receives a
-complete host-generated keyframe before subsequent dirty rectangles.
+The server binds only to `127.0.0.1`. The page uses a native WebSocket and
+canvas and downloads no dependencies. A viewer that joins an active stream
+receives a complete host-generated keyframe before subsequent dirty rectangles.
 Modern browsers decode LZ4 deltas with a small bounded JavaScript decoder, then
 apply only their changed RGB565 runs to the canvas backing image. The zlib
 fallback uses `DecompressionStream`.

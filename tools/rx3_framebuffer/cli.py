@@ -91,11 +91,7 @@ def receive(host: str, port: int, *, display: bool, frame_rate: int,
     hub = ViewerHub()
     web_server = start_server(hub, web_port) if web_port is not None else None
     if web_server is not None:
-        print(
-            f"web viewer: http://127.0.0.1:{web_port}/ "
-            f"(tailnet: https://{web_port}.prk.network/)",
-            file=sys.stderr,
-        )
+        print(f"web viewer: http://127.0.0.1:{web_port}/", file=sys.stderr)
 
     with socket.create_connection((host, port), timeout=5) as connection:
         connection.settimeout(None)

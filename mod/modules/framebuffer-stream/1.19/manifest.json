@@ -1,13 +1,13 @@
 {
   "id": "framebuffer-stream",
-  "name": "Framebuffer stream (prototype)",
-  "description": "Streams dirty framebuffer tiles over the rear USB-B network.",
+  "name": "Framebuffer stream",
+  "description": "Streams compressed framebuffer deltas over TCP.",
   "firmware": "1.19",
   "default": false,
   "order": 92,
   "runtime_directory": "framebuffer-stream",
   "namespace": "framebuffer_stream",
-  "requires": ["usb-link-root-shell"],
+  "requires": [],
   "conflicts": [],
   "files": [
     {

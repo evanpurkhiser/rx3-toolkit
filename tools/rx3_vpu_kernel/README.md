@@ -16,15 +16,14 @@ Build against the prepared production kernel tree:
 
 ```sh
 ./tools/rx3_vpu_kernel/build-module.sh \
-  /home/evan/workspace/rx3-research/usb-serial-build/kernel-source \
-  /tmp/rx3-vpu-output
+  /path/to/rx3/linux-3.0.101 \
+  build/rx3-vpu-kernel
 ```
 
-The script stages GCC 12.2 from the existing
-`localhost/rx3-usb-serial-builder:bookworm` image, then performs the kernel
-source transformation with strict context checks and performs the
-external-module build inside
-`localhost/rx3-reverse:latest --network=none`. It refuses a kernel tree whose
+Build the shared toolchain image first as described in
+[`tools/rx3_vpu_userspace`](../rx3_vpu_userspace/README.md). The script performs
+the kernel source transformation with strict context checks and the external
+module build inside that image with networking disabled. It refuses a tree whose
 release is not
 `3.0.101-2790-gc248ed7-svn3098` or whose configuration lacks symbol versioning.
 

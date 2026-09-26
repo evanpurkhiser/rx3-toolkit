@@ -6,6 +6,13 @@ driver, firmware, and userspace library. The existing IPU remains available for
 hardware scaling and RGB-to-YUV conversion, so a complete low-overhead capture
 path is feasible after restoring the matching VPU stack.
 
+The repository includes the reproducible kernel, userspace, capture, streamer,
+protocol, and browser-relay sources. The VPU firmware and NXP userspace source
+remain external inputs and are not packaged in an `autoexec.bin`; deployment is
+therefore a manual firmware 1.19 procedure. The transport was validated over
+the rear USB-B network, and the TCP protocol works over any configured RX3
+network interface.
+
 ## Confirmed hardware and firmware state
 
 The released kernel configuration identifies the platform and its enabled media
@@ -194,8 +201,8 @@ The vendor probe has weak cleanup on some failure paths, and userspace calls
 program physical DMA addresses. Every load must therefore reconfirm the highest
 inclusive System RAM address in `/proc/iomem`, supply it as `dram_top`, and
 inspect `dmesg` before opening the device. The module, version probe, private
-H.264 frame, and IPU framebuffer conversion have all passed as separate bounded
-tests. A persistent streamer is the remaining integration boundary.
+H.264 frame, IPU framebuffer conversion, and continuous streamer have all
+passed bounded tests.
 
 ## Live hardware validation
 
@@ -222,7 +229,7 @@ without writing intermediate or output frames to disk.
 The live pipeline sustained 90 frames in 2.97 seconds, or 30.33 fps. FFmpeg
 decoded all 90 frames as 640x400 YUV420 Constrained Baseline H.264 level 3.0.
 The capture contained SPS, PPS, three IDRs, and 87 P-frames and averaged 1.01
-Mbit/s. The browser relay sustained 30.0 fps at 1.00 Mbit/s over tailnet HTTPS;
+Mbit/s. The browser relay sustained 30.0 fps at 1.00 Mbit/s over HTTPS;
 Chromium WebCodecs reported approximately 2 ms from WebSocket receipt to canvas
 display.
 
@@ -232,9 +239,8 @@ latency. Fine waveform edges and small text remained clearer during motion,
 with no observed frame-rate cost.
 
 A 3 Mbit/s target with the same QP 20 setting also retained 30.01 fps. Chromium
-measured 3.13 Mbit/s and 2 ms decode latency. This is the active quality setting;
-the 1 and 2 Mbit/s binaries remain available on the test USB drive for direct
-rollback comparisons.
+measured 3.13 Mbit/s and 2 ms decode latency. This is the checked-in quality
+setting; change the target rate and rebuild to compare lower-bandwidth profiles.
 
 ## Browser transport
 
@@ -243,13 +249,11 @@ multipart HTTP stream, and the VPU or the installed NEON libjpeg-turbo can
 produce each frame independently. Its bandwidth will be higher than H.264, but
 it is simple to validate and has predictable latency.
 
-H.264 is the preferred final transport because temporal prediction compresses
-the mostly static UI and moving waveform efficiently. The VPU emits an Annex-B
-elementary stream, which a browser video element cannot consume directly. The
-companion should preserve SPS/PPS and remux the stream into fragmented MP4 for
-Media Source Extensions, or package it for WebRTC. H.264 Baseline, no B-frames,
-a roughly one-second GOP, and a 0.5 to 2 Mbit/s target are appropriate starting
-settings for 640x400 at 30 fps.
+H.264 is the efficient transport because temporal prediction compresses the
+mostly static UI and moving waveform. The VPU emits Annex-B access units. The
+included relay preserves SPS/PPS, forwards complete access units over a bounded
+WebSocket queue, and uses WebCodecs for browser decode. H.264 Baseline, no
+B-frames, and a roughly one-second GOP keep recovery and latency bounded.
 
 The existing WebSocket canvas remains useful for diagnostic tile streams. It
 can also carry cheaply compressed dirty rectangles while the VPU path is being
@@ -258,20 +262,17 @@ offload of H.264.
 
 ## Continuous-stream implementation
 
-The production loop should keep the IPU and VPU descriptors, VPU encoder, and
-bitstream buffer open for the lifetime of a client session. Two or three I420
-DMA buffers form an ownership ring: one is available to the IPU, one may be
-owned by the VPU, and one may wait for either stage. A timer selects a new
-framebuffer page at 30 Hz and drops that capture when no IPU buffer is free.
-The encoder emits an IDR and SPS/PPS when a client connects, followed by
-P-frames with a roughly one-second GOP. A bounded socket queue similarly drops
-complete access units when the USB network cannot keep up.
+The streamer keeps the IPU and VPU descriptors, encoder, and bitstream buffer
+open for the client session. Three I420 DMA buffers rotate through capture and
+synchronous VPU submission. A 30 Hz timer selects the active framebuffer page;
+bounded writes disconnect a receiver that cannot keep up. Each connection
+receives SPS/PPS and a forced IDR before dependent frames, followed by a
+one-second GOP.
 
-The companion should first remux Annex-B access units into fragmented MP4 for
-Media Source Extensions. WebRTC is a later transport option when interactive
-latency and congestion control justify the added signaling. Validation should
-measure sustained delivered frame rate, bitrate, latency, dropped frames, RX3
-CPU use, audio stability, and UI responsiveness under moving waveforms.
+The relay drops a complete stale GOP when a browser queue fills and resumes at
+the next IDR. This preserves decode correctness while bounding latency and
+memory. WebRTC remains an optional future transport when congestion control and
+signaling justify the additional complexity.
 
 The RX3 boots with `isolcpus=3`. Its IRQ policy assigns SDMA to CPU 3, USB and
 Ethernet to CPU 2, and IPU/Vivante interrupts to CPU 1. Software encoder and

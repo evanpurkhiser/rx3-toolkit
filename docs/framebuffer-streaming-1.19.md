@@ -220,7 +220,7 @@ conversion and presentation off the player and gives each late viewer a complete
 host-generated snapshot before live deltas. It also avoids encoding and decoding
 a conventional video stream for the first proof of concept.
 
-Live validation reproduced the full performance screen through tailnet HTTPS.
+Live validation reproduced the full performance screen through HTTPS.
 The initial raw-tile implementation delivered 1.8 to 1.9 changed frames per
 second at 6.6 to 7.0 Mbit/s. Direct protocol profiling found 480 to 513 KiB per
 moving update and matching source and arrival intervals around 545 ms. The host
@@ -246,8 +246,8 @@ the waveform screen reached 7.2 frames per second at 2.04 Mbit/s. This is an
 observed point rather than a maximum-rate benchmark, but it confirms that the
 compressed stream remains synchronized during rapid redraws while using
 substantially less bandwidth than raw tiles. It is still below a fluid 15 to 30
-frames per second, so the hardware IPU and VPU path is the next implementation
-target.
+frames per second. The hardware IPU and VPU path documented alongside this
+module provides the 30 fps option.
 
 ## Live validation order
 

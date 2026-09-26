@@ -1,2 +1,1 @@
-"""Host tools for the RX3 framebuffer stream."""
-
+"""RX3 framebuffer receiver package."""

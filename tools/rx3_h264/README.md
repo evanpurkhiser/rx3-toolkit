@@ -13,9 +13,9 @@ python3 -m tools.rx3_h264.relay \
   --bind 127.0.0.1 --port 7353
 ```
 
-The viewer is then available at `http://127.0.0.1:7353/` and, with the server's
-existing nginx tailnet proxy, at `https://7353.prk.network/`. The JSON health
-endpoint is `/healthz`.
+The viewer is then available at `http://127.0.0.1:7353/`. The JSON health
+endpoint is `/healthz`. Bind to another address or place a TLS reverse proxy in
+front of the relay when serving a separate browser.
 
 ## Wire format
 
@@ -39,7 +39,7 @@ drops stale GOPs for slow browser clients and resumes at the next IDR frame.
 
 ## Live result
 
-The initial tailnet HTTPS and secure WebSocket path sustained 30.0 fps at 1.00
+The initial HTTPS and secure WebSocket path sustained 30.0 fps at 1.00
 Mbit/s. After increasing the encoder target to 2 Mbit/s and lowering picture QP
 from 23 to 20, the relay sustained 30.06 fps. Chromium measured 2.07 Mbit/s and
 3 ms from WebSocket receipt to canvas display while showing a moving waveform.

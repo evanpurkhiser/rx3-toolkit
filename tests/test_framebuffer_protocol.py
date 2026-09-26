@@ -43,6 +43,25 @@ def read_websocket_payload(connection: socket.socket) -> bytes:
     return read_exact(connection, length)
 
 
+class RecordingSocket:
+    def __init__(self) -> None:
+        self.data = bytearray()
+
+    def settimeout(self, _timeout: float) -> None:
+        pass
+
+    def sendall(self, payload: bytes) -> None:
+        self.data.extend(payload)
+
+    def recv(self, length: int) -> bytes:
+        payload = bytes(self.data[:length])
+        del self.data[:length]
+        return payload
+
+    def close(self) -> None:
+        pass
+
+
 class ProtocolTests(unittest.TestCase):
     def test_web_viewer_decodes_lz4_frames_in_order(self) -> None:
         self.assertIn("function decompressLz4", INDEX_HTML)
@@ -206,9 +225,9 @@ class ProtocolTests(unittest.TestCase):
         message = next(Decoder().feed(encode_message(FRAME, 9, payload, 1)))
         hub.apply_and_publish(message)
 
-        server, browser = socket.socketpair()
+        browser = RecordingSocket()
         try:
-            hub.add(server)
+            hub.add(browser)
             hello = next(Decoder().feed(read_websocket_payload(browser)))
             snapshot = next(Decoder().feed(read_websocket_payload(browser)))
 
@@ -218,8 +237,7 @@ class ProtocolTests(unittest.TestCase):
             restored.apply(snapshot)
             self.assertEqual(restored.pixels, pixels)
         finally:
-            hub.remove(server)
-            server.close()
+            hub.remove(browser)
             browser.close()
 
 

@@ -10,9 +10,9 @@ Build in the offline rootless Podman toolchain:
 
 ```sh
 ./tools/rx3_vpu_stream/build.sh \
-  /tmp/rx3-vpu-inspect/imx-vpu-3.10.17-1.0.0/vpu \
-  /home/evan/workspace/rx3-research/artifacts/system-root \
-  /tmp/rx3-vpu-stream-build
+  /path/to/imx-vpu-3.10.17-1.0.0/vpu \
+  /path/to/extracted/rx3/rootfs \
+  build/rx3-vpu-stream
 ```
 
 The RX3 needs `mxc_vpu.ko` loaded with the discovered DRAM limit and the VPU

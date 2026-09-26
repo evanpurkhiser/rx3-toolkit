@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Starts a RAM-only framebuffer tile stream on the USB Link Export network.
+# Starts a RAM-only framebuffer tile stream on every configured network link.
 
 module_begin framebuffer-stream framebuffer_stream
 
@@ -68,7 +68,7 @@ framebuffer_stream_prepare()
     }
 
     request_rbp_restart
-    say "Framebuffer stream prepared: 169.254.100.2:7351, protocol v1"
+    say "Framebuffer stream prepared: TCP port 7351, protocol v1"
 }
 
 framebuffer_stream_after_launch()
