@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Installs the performance core: the shared object that carries the hook
-# installer and the on-screen additions. Features -- stems, key shift -- are
+# Installs the UI core: the shared object that carries the hook
+# installer and on-screen additions. Features -- stems, key shift, Utility -- are
 # separate modules that switch themselves on through the environment; this one
 # owns the binary and decides when rbp has to be restarted for it.
 
@@ -79,14 +79,14 @@ core_normalize_preload()
 core_prepare()
 {
     [ -r "$CORE_SRC" ] || {
-        say "Performance core disabled: shared object is missing"
+        say "RX3 UI core disabled: shared object is missing"
         return 1
     }
     core_install_asset "$CORE_TAB_KEY_SRC" "$CORE_TAB_KEY" &&
     core_install_asset "$CORE_TAB_STEMS_SRC" "$CORE_TAB_STEMS" &&
     core_install_asset "$CORE_TAB_NONE_SRC" "$CORE_TAB_NONE" &&
     core_install_asset "$CORE_STATUS_NONE_SRC" "$CORE_STATUS_NONE" || {
-        say "Performance core disabled: custom tab assets cannot be installed"
+        say "RX3 UI core disabled: custom tab assets cannot be installed"
         return 1
     }
 
@@ -103,39 +103,39 @@ core_prepare()
     if preload_contains "$CORE_LIB" && cmp -s "$CORE_SRC" "$CORE_LIB" &&
        [ "$preload_changed" = "0" ] && [ "$NEED_RBP_RESTART" = "0" ]; then
         CORE_RESIDENT=1
-        say "Performance core already active, rbp left untouched"
+        say "RX3 UI core already active, rbp left untouched"
         return
     fi
 
     rm -f "$CORE_LOG" "$CORE_READY" "$CORE_TMP"
     cp "$CORE_SRC" "$CORE_TMP" 2>/dev/null || {
-        say "Performance core disabled: cannot copy shared object"
+        say "RX3 UI core disabled: cannot copy shared object"
         CORE_INSTALLED=0
         return 1
     }
     chmod 644 "$CORE_TMP"
     mv -f "$CORE_TMP" "$CORE_LIB" 2>/dev/null || {
         rm -f "$CORE_TMP"
-        say "Performance core disabled: cannot install shared object atomically"
+        say "RX3 UI core disabled: cannot install shared object atomically"
         CORE_INSTALLED=0
         return 1
     }
     request_rbp_restart
-    say "Performance core prepared: native overlay and touch"
+    say "RX3 UI core prepared"
 }
 
 core_after_launch()
 {
     [ "$CORE_INSTALLED" = "1" ] || return 0
     if [ "$CORE_RESIDENT" = "1" ]; then
-        say "OK: performance core still active from the previous insertion"
+        say "OK: RX3 UI core still active from the previous insertion"
         return 0
     fi
     if [ -s "$CORE_READY" ] &&
-       grep -q 'RX3 performance hook active' "$CORE_LOG" 2>/dev/null; then
-        say "OK: performance core active"
+       grep -Eq 'RX3 (performance hook|utility extension) active' "$CORE_LOG" 2>/dev/null; then
+        say "OK: RX3 UI core active"
     else
-        say "WARNING: rbp is active but the performance core is inactive"
+        say "WARNING: rbp is active but the RX3 UI core is inactive"
     fi
     cat "$CORE_LOG" >> "$LOG" 2>/dev/null
 }

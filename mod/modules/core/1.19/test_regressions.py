@@ -125,7 +125,8 @@ require(
 )
 require(
     'RX3_KEYSHIFT' in HOOK and 'RX3_STEMS_DIR' in HOOK
-    and "if (!configure_features())" in HOOK,
+    and "performance_features = configure_features()" in HOOK
+    and "rx3_install_utility_extensions()" in HOOK,
     "each feature must announce itself through its own module's environment",
 )
 require(

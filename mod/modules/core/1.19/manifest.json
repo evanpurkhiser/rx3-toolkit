@@ -1,7 +1,7 @@
 {
   "id": "core",
-  "name": "On-screen key shift & stems",
-  "description": "On-screen features for key shift and stems.",
+  "name": "RX3 UI extension core",
+  "description": "Shared firmware hooks for modular on-screen controls and Utility settings.",
   "firmware": "1.19",
   "default": false,
   "selectable": false,
@@ -38,7 +38,8 @@
     }
   ],
   "build_files": [
-    "rx3_feature_api.h"
+    "rx3_feature_api.h",
+    "rx3_utility_broker.h"
   ],
   "arm_hook": {
     "source": "rx3_core_hook.c",

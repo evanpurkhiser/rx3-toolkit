@@ -113,6 +113,7 @@ typedef unsigned char  uint8_t;
 typedef unsigned short uint16_t;
 typedef short          int16_t;
 typedef unsigned int   uint32_t;
+typedef signed int     int32_t;
 typedef unsigned long long uint64_t;
 typedef unsigned long pthread_t;
 
@@ -931,6 +932,8 @@ static int write_code(unsigned long address, const void *bytes, size_t length)
         return -1;
     return 0;
 }
+
+#include "rx3_utility_broker.h"
 
 static void uninstall_hook(struct installed_hook *hook)
 {
@@ -2130,8 +2133,17 @@ __attribute__((constructor)) static void initialize(void)
         stems_dir = 0;
     const char *keyshift = getenv("RX3_KEYSHIFT");
     keyshift_enabled = keyshift && keyshift[0] == '1';
-    if (!configure_features()) {
+    const unsigned int utility_extensions =
+        rx3_install_utility_extensions();
+    const unsigned int performance_features = configure_features();
+    if (!performance_features && !utility_extensions) {
         /* Nothing selected: leave rbp exactly as it is. */
+        return;
+    }
+
+    if (!performance_features) {
+        publish_ready();
+        log_line("RX3 utility extension active");
         return;
     }
 
@@ -2294,12 +2306,17 @@ reject_performance_hooks:
     original_draw_image = 0;
     original_draw_text = 0;
     original_load = 0;
+    if (utility_extensions) {
+        publish_ready();
+        log_line("RX3 utility extension active");
+    }
 }
 
 __attribute__((destructor)) static void finalize(void)
 {
     state_thread_running = 0;
     uninstall_performance_hooks();
+    rx3_remove_utility_extensions();
     for (unsigned int i = 0; i < 2u; i++) {
         for (unsigned int feature = 0;
              feature < RUNTIME_FEATURE_COUNT; feature++)

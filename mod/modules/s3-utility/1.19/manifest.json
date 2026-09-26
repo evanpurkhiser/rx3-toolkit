@@ -1,0 +1,24 @@
+{
+  "id": "s3-utility",
+  "name": "ESP32-S3 utility integration",
+  "description": "Shows ESP32-S3 Wi-Fi and Link status in the RX3 Utility screen.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 105,
+  "runtime_directory": "s3-utility",
+  "namespace": "s3_utility",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "rx3_s3_utility_feature.h"
+  ]
+}

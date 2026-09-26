@@ -36,4 +36,22 @@ struct rx3_runtime_feature {
     void (*destroy_deck)(unsigned int deck);
 };
 
+enum rx3_utility_item_kind {
+    RX3_UTILITY_SECTION,
+    RX3_UTILITY_VALUE,
+};
+
+struct rx3_utility_item {
+    enum rx3_utility_item_kind kind;
+    const char *label;
+    const char *(*value)(void);
+};
+
+struct rx3_utility_extension {
+    const char *name;
+    int (*configured)(void);
+    unsigned int item_count;
+    const struct rx3_utility_item *items;
+};
+
 #endif /* RX3_FEATURE_API_H */
