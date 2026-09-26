@@ -13,6 +13,10 @@ podman build \
   tools/rx3_vpu_userspace
 ```
 
+The shared image also contains `bzip2`, QEMU user-mode emulation, and the
+OpenSSH client. The RX3 Dropbear build uses these tools for container-only
+source extraction and its ARM authentication smoke test.
+
 Then build the probe without network access:
 
 ```sh

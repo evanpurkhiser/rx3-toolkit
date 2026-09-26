@@ -53,10 +53,12 @@ tmpfs mounts. Settings and GUI assets are writable UBIFS volumes:
 | `/media/usb1/sda2` | Toolkit drive data partition | 29.0 GiB |
 | `/mnt/iso` | Decrypted toolkit image through `/dev/loop0` | 394 KiB |
 
-The toolkit ISO remains mounted read-only at `/mnt/iso` after its startup script
-runs. The shell, network alias, PID files, and loaded code live in RAM. The UBI
-volumes are persistent and should be treated as firmware state rather than
-scratch space.
+The firmware mounts the decrypted toolkit ISO read-only at `/mnt/iso` while its
+startup script runs, then unmounts it and releases the loop device. Long-lived
+daemons must change their working directory away from `/mnt/iso` and copy any
+needed executables into RAM before returning. The shell, network alias, PID
+files, and loaded code live in RAM. The UBI volumes are persistent and should
+be treated as firmware state rather than scratch space.
 
 The 256 MiB NAND has seventeen overlapping logical partitions. The named
 firmware regions are:
