@@ -11,14 +11,12 @@ static size_t write_request(uint8_t *packet,
                             uint16_t payload_length)
 {
     memcpy(packet, "RX3C", 4);
-    packet[4] = RX3_S3_CONFIG_VERSION;
-    packet[5] = opcode;
-    packet[6] = 0;
-    packet[7] = 0;
-    packet[8] = request_id >> 8;
-    packet[9] = request_id & 0xff;
-    packet[10] = payload_length >> 8;
-    packet[11] = payload_length & 0xff;
+    packet[4] = opcode;
+    packet[5] = 0;
+    packet[6] = request_id >> 8;
+    packet[7] = request_id & 0xff;
+    packet[8] = payload_length >> 8;
+    packet[9] = payload_length & 0xff;
     if (payload_length != 0) {
         memcpy(packet + RX3_S3_CONFIG_HEADER_SIZE, payload, payload_length);
     }
@@ -35,14 +33,14 @@ static void test_request_header(void)
     assert(request.request_id == 0x1234);
     assert(request.payload_length == 0);
 
-    packet[4] = 2;
+    packet[0] = 'B';
     assert(!rx3_config_parse_request(packet, length, &request));
-    packet[4] = RX3_S3_CONFIG_VERSION;
-    packet[6] = 1;
+    packet[0] = 'R';
+    packet[5] = 1;
     assert(!rx3_config_parse_request(packet, length, &request));
-    packet[6] = 0;
-    packet[10] = 0;
-    packet[11] = 1;
+    packet[5] = 0;
+    packet[8] = 0;
+    packet[9] = 1;
     assert(!rx3_config_parse_request(packet, length, &request));
 }
 
@@ -90,7 +88,6 @@ static void test_response_and_status(void)
     };
     const rx3_config_live_status_t status = {
         .flags = RX3_S3_CONFIG_FLAG_WIFI_CONNECTED |
-                 RX3_S3_CONFIG_FLAG_CREDENTIALS_CONFIGURED |
                  RX3_S3_CONFIG_FLAG_PASSWORD_SET,
         .rssi = -42,
         .mac = {0x02, 0x52, 0x58, 0x33, 0x00, 0x01},
@@ -115,10 +112,10 @@ static void test_response_and_status(void)
                                                               status_length);
     assert(response_length == RX3_S3_CONFIG_HEADER_SIZE + status_length);
     assert(memcmp(response, "RX3C", 4) == 0);
-    assert(response[5] == (RX3_S3_CONFIG_GET_STATUS | RX3_S3_CONFIG_RESPONSE_BIT));
-    assert(response[6] == RX3_S3_CONFIG_OK);
-    assert(response[8] == 0xab && response[9] == 0xcd);
-    assert(response[10] == 0 && response[11] == status_length);
+    assert(response[4] == (RX3_S3_CONFIG_GET_STATUS | RX3_S3_CONFIG_RESPONSE_BIT));
+    assert(response[5] == RX3_S3_CONFIG_OK);
+    assert(response[6] == 0xab && response[7] == 0xcd);
+    assert(response[8] == 0 && response[9] == status_length);
     assert(memmem(response, response_length, "password", 8) == NULL);
 }
 

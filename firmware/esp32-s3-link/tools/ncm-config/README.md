@@ -1,6 +1,6 @@
 # NCM configuration command
 
-`rx3-s3-config` exercises the versioned S3 configuration protocol directly
+`rx3-s3-config` exercises the S3 configuration protocol directly
 from the RX3. It reads live status, atomically changes Wi-Fi credentials, and
 requests reconnection without requiring Wi-Fi association or an IP address.
 

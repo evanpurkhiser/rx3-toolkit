@@ -20,7 +20,6 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
-#include "wifi_credentials.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
@@ -63,7 +62,6 @@ static uint8_t s_bridge_mac[BRIDGE_MAC_LENGTH];
 static TaskHandle_t s_bootloader_task;
 static QueueHandle_t s_config_commands;
 static rx3_wifi_credentials_t s_wifi_credentials;
-static bool s_wifi_credentials_saved;
 
 #define BRIDGE_MAX_FRAME_SIZE 1600
 #define ETHERNET_MIN_FRAME_SIZE 60
@@ -220,29 +218,17 @@ static void queue_live_status_response(const uint8_t *ethernet_addresses,
         .rssi = -127,
     };
     bool wifi_connected;
-    bool usb_link_up;
-
     portENTER_CRITICAL(&s_bridge.lock);
     wifi_connected = s_bridge.wifi_connected;
-    usb_link_up = s_bridge.usb_link_up;
     status.ssid_length = s_wifi_credentials.ssid_length;
     memcpy(status.ssid, s_wifi_credentials.ssid, s_wifi_credentials.ssid_length);
-    if (s_wifi_credentials.ssid_length != 0) {
-        status.flags |= RX3_S3_CONFIG_FLAG_CREDENTIALS_CONFIGURED;
-    }
     if (s_wifi_credentials.password_length != 0) {
         status.flags |= RX3_S3_CONFIG_FLAG_PASSWORD_SET;
-    }
-    if (s_wifi_credentials_saved) {
-        status.flags |= RX3_S3_CONFIG_FLAG_SAVED_OVERRIDE;
     }
     portEXIT_CRITICAL(&s_bridge.lock);
 
     if (wifi_connected) {
         status.flags |= RX3_S3_CONFIG_FLAG_WIFI_CONNECTED;
-    }
-    if (usb_link_up) {
-        status.flags |= RX3_S3_CONFIG_FLAG_NCM_LINK_UP;
     }
     memcpy(status.mac, s_bridge_mac, sizeof(status.mac));
 
@@ -258,7 +244,7 @@ static void queue_live_status_response(const uint8_t *ethernet_addresses,
     if (payload_length == 0) {
         queue_config_response(ethernet_addresses,
                               request,
-                              RX3_S3_CONFIG_INTERNAL_ERROR,
+                              RX3_S3_CONFIG_FAILED,
                               NULL,
                               0);
         return;
@@ -323,6 +309,68 @@ static esp_err_t apply_wifi_credentials(const rx3_wifi_credentials_t *credential
     return result;
 }
 
+static size_t bounded_string_length(const uint8_t *text, size_t capacity)
+{
+    size_t length = 0;
+    while (length < capacity && text[length] != 0) {
+        length++;
+    }
+    return length;
+}
+
+static bool read_station_credentials(const wifi_config_t *station,
+                                     rx3_wifi_credentials_t *credentials)
+{
+    const size_t ssid_length = bounded_string_length(station->sta.ssid,
+                                                      sizeof(station->sta.ssid));
+    const size_t password_length = bounded_string_length(station->sta.password,
+                                                          sizeof(station->sta.password));
+    if (ssid_length == 0 || ssid_length > RX3_CONFIG_SSID_MAX_LENGTH ||
+        password_length > RX3_CONFIG_PASSWORD_MAX_LENGTH ||
+        (password_length != 0 && password_length < 8)) {
+        return false;
+    }
+
+    memset(credentials, 0, sizeof(*credentials));
+    credentials->ssid_length = ssid_length;
+    credentials->password_length = password_length;
+    memcpy(credentials->ssid, station->sta.ssid, ssid_length);
+    memcpy(credentials->password, station->sta.password, password_length);
+    return true;
+}
+
+static esp_err_t load_wifi_credentials(void)
+{
+    wifi_config_t station = {0};
+    const esp_err_t read_result = esp_wifi_get_config(WIFI_IF_STA, &station);
+    if (read_result != ESP_OK) {
+        memset(&station, 0, sizeof(station));
+        return read_result;
+    }
+    if (read_station_credentials(&station, &s_wifi_credentials)) {
+        memset(&station, 0, sizeof(station));
+        return ESP_OK;
+    }
+    memset(&station, 0, sizeof(station));
+
+    const size_t ssid_length = strlen(CONFIG_RX3_LINK_WIFI_SSID);
+    const size_t password_length = strlen(CONFIG_RX3_LINK_WIFI_PASSWORD);
+    if (ssid_length == 0 || ssid_length > RX3_CONFIG_SSID_MAX_LENGTH ||
+        password_length > RX3_CONFIG_PASSWORD_MAX_LENGTH ||
+        (password_length != 0 && password_length < 8)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(&s_wifi_credentials, 0, sizeof(s_wifi_credentials));
+    s_wifi_credentials.ssid_length = ssid_length;
+    s_wifi_credentials.password_length = password_length;
+    memcpy(s_wifi_credentials.ssid, CONFIG_RX3_LINK_WIFI_SSID, ssid_length);
+    memcpy(s_wifi_credentials.password,
+           CONFIG_RX3_LINK_WIFI_PASSWORD,
+           password_length);
+    return apply_wifi_credentials(&s_wifi_credentials);
+}
+
 static void request_wifi_reconnect(void)
 {
     const esp_err_t disconnect_result = esp_wifi_disconnect();
@@ -355,35 +403,16 @@ static void config_command_task(void *argument)
         bool reconnect = false;
 
         if (command.opcode == RX3_S3_CONFIG_SET_CREDENTIALS) {
-            rx3_wifi_credentials_t previous;
-            portENTER_CRITICAL(&s_bridge.lock);
-            previous = s_wifi_credentials;
-            portEXIT_CRITICAL(&s_bridge.lock);
-
             const esp_err_t apply_result = apply_wifi_credentials(&command.credentials);
             if (apply_result != ESP_OK) {
                 ESP_LOGE(TAG, "Could not apply Wi-Fi credentials: %s", esp_err_to_name(apply_result));
-                status = RX3_S3_CONFIG_INTERNAL_ERROR;
+                status = RX3_S3_CONFIG_FAILED;
             } else {
-                const esp_err_t save_result = wifi_credentials_save(&command.credentials);
-                if (save_result == ESP_OK) {
-                    portENTER_CRITICAL(&s_bridge.lock);
-                    s_wifi_credentials = command.credentials;
-                    s_wifi_credentials_saved = true;
-                    portEXIT_CRITICAL(&s_bridge.lock);
-                    reconnect = true;
-                } else {
-                    ESP_LOGE(TAG, "Could not save Wi-Fi credentials: %s", esp_err_to_name(save_result));
-                    const esp_err_t rollback_result = apply_wifi_credentials(&previous);
-                    if (rollback_result != ESP_OK) {
-                        ESP_LOGE(TAG,
-                                 "Could not restore prior Wi-Fi credentials: %s",
-                                 esp_err_to_name(rollback_result));
-                    }
-                    status = RX3_S3_CONFIG_STORAGE_ERROR;
-                }
+                portENTER_CRITICAL(&s_bridge.lock);
+                s_wifi_credentials = command.credentials;
+                portEXIT_CRITICAL(&s_bridge.lock);
+                reconnect = true;
             }
-            memset(&previous, 0, sizeof(previous));
         } else if (command.opcode == RX3_S3_CONFIG_RECONNECT) {
             reconnect = true;
         }
@@ -435,8 +464,8 @@ static void handle_config_frame(const uint8_t *frame, uint16_t length)
     rx3_config_request_t request;
     if (!rx3_config_parse_request(packet, packet_length, &request)) {
         const rx3_config_request_t malformed = {
-            .opcode = packet_length > 5 ? packet[5] : 0,
-            .request_id = packet_length > 9 ? ((uint16_t)packet[8] << 8) | packet[9] : 0,
+            .opcode = packet_length > 4 ? packet[4] : 0,
+            .request_id = packet_length > 7 ? ((uint16_t)packet[6] << 8) | packet[7] : 0,
         };
         queue_config_response(frame, &malformed, RX3_S3_CONFIG_BAD_REQUEST, NULL, 0);
         return;
@@ -461,13 +490,13 @@ static void handle_config_frame(const uint8_t *frame, uint16_t length)
         if (!rx3_config_parse_credentials(&request, &command.credentials)) {
             queue_config_response(frame,
                                   &request,
-                                  RX3_S3_CONFIG_INVALID_CREDENTIALS,
+                                  RX3_S3_CONFIG_BAD_REQUEST,
                                   NULL,
                                   0);
             return;
         }
     } else if (request.opcode != RX3_S3_CONFIG_RECONNECT) {
-        queue_config_response(frame, &request, RX3_S3_CONFIG_UNSUPPORTED, NULL, 0);
+        queue_config_response(frame, &request, RX3_S3_CONFIG_BAD_REQUEST, NULL, 0);
         return;
     } else if (request.payload_length != 0) {
         queue_config_response(frame, &request, RX3_S3_CONFIG_BAD_REQUEST, NULL, 0);
@@ -475,7 +504,7 @@ static void handle_config_frame(const uint8_t *frame, uint16_t length)
     }
 
     if (xQueueSend(s_config_commands, &command, 0) != pdTRUE) {
-        queue_config_response(frame, &request, RX3_S3_CONFIG_INTERNAL_ERROR, NULL, 0);
+        queue_config_response(frame, &request, RX3_S3_CONFIG_FAILED, NULL, 0);
     }
     memset(&command, 0, sizeof(command));
 }
@@ -763,16 +792,15 @@ static esp_err_t initialize_nvs(void)
     return result;
 }
 
-static esp_err_t initialize_wifi(uint8_t bridge_mac[BRIDGE_MAC_LENGTH],
-                                 const rx3_wifi_credentials_t *credentials)
+static esp_err_t initialize_wifi(uint8_t bridge_mac[BRIDGE_MAC_LENGTH])
 {
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "Could not create event loop");
 
     wifi_init_config_t initialization = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&initialization), TAG, "Could not initialize Wi-Fi");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_RAM),
+    ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_FLASH),
                         TAG,
-                        "Could not select volatile ESP Wi-Fi storage");
+                        "Could not select persistent Wi-Fi storage");
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Could not select station mode");
 
     if (CONFIG_RX3_LINK_WIFI_MAC[0] != '\0') {
@@ -785,7 +813,7 @@ static esp_err_t initialize_wifi(uint8_t bridge_mac[BRIDGE_MAC_LENGTH],
         ESP_RETURN_ON_ERROR(esp_read_mac(bridge_mac, ESP_MAC_WIFI_STA), TAG, "Could not read station MAC");
     }
 
-    ESP_RETURN_ON_ERROR(apply_wifi_credentials(credentials), TAG, "Could not configure station");
+    ESP_RETURN_ON_ERROR(load_wifi_credentials(), TAG, "Could not configure station");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT,
                                                     ESP_EVENT_ANY_ID,
                                                     wifi_event,
@@ -880,8 +908,7 @@ static void stats_task(void *argument)
 void app_main(void)
 {
     ESP_ERROR_CHECK(initialize_nvs());
-    ESP_ERROR_CHECK(wifi_credentials_load(&s_wifi_credentials, &s_wifi_credentials_saved));
-    ESP_ERROR_CHECK(initialize_wifi(s_bridge_mac, &s_wifi_credentials));
+    ESP_ERROR_CHECK(initialize_wifi(s_bridge_mac));
     ESP_ERROR_CHECK(initialize_wifi_to_usb_queue());
     ESP_ERROR_CHECK(initialize_config_commands());
 

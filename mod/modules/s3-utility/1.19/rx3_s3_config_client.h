@@ -42,10 +42,7 @@ struct rx3_s3_pollfd { int fd; short events; short revents; };
 struct rx3_s3_snapshot {
     uint8_t reachable;
     uint8_t wifi_connected;
-    uint8_t ncm_up;
-    uint8_t credentials_set;
     uint8_t password_set;
-    uint8_t saved_override;
     signed char rssi;
     uint8_t mac[6];
     uint8_t ipv4[4];
@@ -196,10 +193,7 @@ static int rx3_s3_parse_status(const uint8_t *payload, unsigned int length,
     const uint8_t flags = payload[0];
     snapshot->reachable = 1u;
     snapshot->wifi_connected = !!(flags & RX3_S3_CONFIG_FLAG_WIFI_CONNECTED);
-    snapshot->ncm_up = !!(flags & RX3_S3_CONFIG_FLAG_NCM_LINK_UP);
-    snapshot->credentials_set = !!(flags & RX3_S3_CONFIG_FLAG_CREDENTIALS_CONFIGURED);
     snapshot->password_set = !!(flags & RX3_S3_CONFIG_FLAG_PASSWORD_SET);
-    snapshot->saved_override = !!(flags & RX3_S3_CONFIG_FLAG_SAVED_OVERRIDE);
     snapshot->rssi = (signed char)payload[1];
     memcpy(snapshot->mac, payload + 2u, sizeof(snapshot->mac));
     rx3_s3_copy_text(snapshot->ssid, sizeof(snapshot->ssid),
@@ -219,19 +213,17 @@ static unsigned int rx3_s3_build_payload(uint8_t *payload, uint8_t opcode,
     unsigned int body_length = opcode == RX3_S3_CONFIG_SET_CREDENTIALS
                                    ? 2u + ssid_length + password_length : 0u;
     memcpy(payload, "RX3C", 4u);
-    payload[4] = RX3_S3_CONFIG_VERSION;
-    payload[5] = opcode;
-    payload[6] = RX3_S3_CONFIG_OK;
-    payload[7] = 0u;
-    payload[8] = (uint8_t)(request_id >> 8u);
-    payload[9] = (uint8_t)request_id;
-    payload[10] = (uint8_t)(body_length >> 8u);
-    payload[11] = (uint8_t)body_length;
+    payload[4] = opcode;
+    payload[5] = RX3_S3_CONFIG_OK;
+    payload[6] = (uint8_t)(request_id >> 8u);
+    payload[7] = (uint8_t)request_id;
+    payload[8] = (uint8_t)(body_length >> 8u);
+    payload[9] = (uint8_t)body_length;
     if (body_length) {
-        payload[12] = (uint8_t)ssid_length;
-        payload[13] = (uint8_t)password_length;
-        memcpy(payload + 14u, ssid, ssid_length);
-        memcpy(payload + 14u + ssid_length, password, password_length);
+        payload[10] = (uint8_t)ssid_length;
+        payload[11] = (uint8_t)password_length;
+        memcpy(payload + 12u, ssid, ssid_length);
+        memcpy(payload + 12u + ssid_length, password, password_length);
     }
     return RX3_S3_CONFIG_HEADER_SIZE + body_length;
 }
@@ -243,13 +235,12 @@ static int rx3_s3_parse_response(const uint8_t *payload, unsigned int length,
 {
     if (length < RX3_S3_CONFIG_HEADER_SIZE ||
         memcmp(payload, "RX3C", 4u) ||
-        payload[4] != RX3_S3_CONFIG_VERSION ||
-        payload[5] != (uint8_t)(opcode | RX3_S3_CONFIG_RESPONSE_BIT) ||
-        payload[6] != RX3_S3_CONFIG_OK || payload[7] != 0u ||
-        payload[8] != (uint8_t)(request_id >> 8u) ||
-        payload[9] != (uint8_t)request_id)
+        payload[4] != (uint8_t)(opcode | RX3_S3_CONFIG_RESPONSE_BIT) ||
+        payload[5] != RX3_S3_CONFIG_OK ||
+        payload[6] != (uint8_t)(request_id >> 8u) ||
+        payload[7] != (uint8_t)request_id)
         return 0;
-    const unsigned int declared = ((unsigned int)payload[10] << 8u) | payload[11];
+    const unsigned int declared = ((unsigned int)payload[8] << 8u) | payload[9];
     if (declared > length - RX3_S3_CONFIG_HEADER_SIZE)
         return 0;
     *body = payload + RX3_S3_CONFIG_HEADER_SIZE;
@@ -306,7 +297,8 @@ static int rx3_s3_exchange(int descriptor,
         const long received = rx3_s3_syscall6(
             RX3_S3_SYS_RECVFROM, descriptor, (long)frame, sizeof(frame),
             0, 0, 0);
-        if (received < 26 || frame[12] != (RX3_S3_CONFIG_ETHERTYPE >> 8u) ||
+        if (received < 14 + RX3_S3_CONFIG_HEADER_SIZE ||
+            frame[12] != (RX3_S3_CONFIG_ETHERTYPE >> 8u) ||
             frame[13] != (RX3_S3_CONFIG_ETHERTYPE & 0xffu))
             continue;
         const uint8_t *body;

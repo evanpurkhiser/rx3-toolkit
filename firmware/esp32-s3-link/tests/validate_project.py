@@ -71,11 +71,10 @@ def main() -> int:
             "Wi-Fi completion callback must count both outcomes")
     require(r'esp_wifi_sta_get_ap_info\(&access_point\)[\s\S]*access_point\.rssi', source,
             "bridge status must report associated RSSI")
-    require(r'esp_wifi_set_storage\(WIFI_STORAGE_RAM\)', source,
-            "the versioned NVS blob must be the only persisted credential source")
-    require(r'wifi_credentials_save\(&command\.credentials\)[\s\S]*'
-            r's_wifi_credentials = command\.credentials', source,
-            "runtime credentials must publish only after persistence succeeds")
+    require(r'esp_wifi_set_storage\(WIFI_STORAGE_FLASH\)', source,
+            "ESP-IDF must persist Wi-Fi configuration")
+    require(r'esp_wifi_get_config\(WIFI_IF_STA, &station\)', source,
+            "boot must reuse the stored ESP-IDF Wi-Fi configuration")
     require(r'RX3_S3_CONFIG_PASSWORD_MAX_LENGTH 63', protocol,
             "wire protocol must preserve the WPA2 passphrase limit")
     require(r'bool tud_msc_is_writable_cb\(uint8_t lun\)[\s\S]*return true;', source,

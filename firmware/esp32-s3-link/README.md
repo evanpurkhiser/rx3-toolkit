@@ -136,13 +136,12 @@ administered unicast address. The firmware rejects multicast and globally
 administered overrides. Keep a chosen override stable because the router's DHCP
 reservation and the RX3 interface identity depend on it.
 
-Credentials live only in ignored `sdkconfig.local.defaults` and the ignored
+Initial credentials live in ignored `sdkconfig.local.defaults` and the ignored
 generated `sdkconfig`. Never add either file to Git.
 
-The RX3 can replace those fallback credentials through the versioned NCM
-configuration protocol. The S3 stores an SSID/password pair as one NVS blob,
-reports live association, RSSI, NCM carrier, SSID, and the shared adapter MAC,
-and never returns the password. See
+The RX3 can replace those credentials through the NCM configuration protocol.
+ESP-IDF persists the station configuration. The S3 reports live association,
+RSSI, SSID, and the shared adapter MAC, and never returns the password. See
 [`docs/configuration-protocol.md`](docs/configuration-protocol.md) for the wire
 format and failure semantics.
 

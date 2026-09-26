@@ -77,14 +77,12 @@ static size_t write_header(unsigned char *payload,
                            size_t body_length)
 {
     memcpy(payload, "RX3C", 4);
-    payload[4] = RX3_S3_CONFIG_VERSION;
-    payload[5] = opcode;
-    payload[6] = RX3_S3_CONFIG_OK;
-    payload[7] = 0;
-    payload[8] = request_id >> 8;
-    payload[9] = request_id & 0xff;
-    payload[10] = body_length >> 8;
-    payload[11] = body_length & 0xff;
+    payload[4] = opcode;
+    payload[5] = RX3_S3_CONFIG_OK;
+    payload[6] = request_id >> 8;
+    payload[7] = request_id & 0xff;
+    payload[8] = body_length >> 8;
+    payload[9] = body_length & 0xff;
     return RX3_S3_CONFIG_HEADER_SIZE;
 }
 
@@ -109,10 +107,10 @@ static size_t build_request(unsigned char *frame,
     unsigned char *payload = frame + ETH_HLEN;
     write_header(payload, opcode, request_id, body_length);
     if (body_length != 0) {
-        payload[12] = ssid_length;
-        payload[13] = password_length;
-        memcpy(payload + 14, ssid, ssid_length);
-        memcpy(payload + 14 + ssid_length, password, password_length);
+        payload[10] = ssid_length;
+        payload[11] = password_length;
+        memcpy(payload + 12, ssid, ssid_length);
+        memcpy(payload + 12 + ssid_length, password, password_length);
     }
     const size_t length = ETH_HLEN + RX3_S3_CONFIG_HEADER_SIZE + body_length;
     return length < ETH_ZLEN ? ETH_ZLEN : length;
@@ -158,19 +156,17 @@ static size_t exchange(const endpoint_t *endpoint,
         if (response[12] != (RX3_S3_CONFIG_ETHERTYPE >> 8) ||
             response[13] != (RX3_S3_CONFIG_ETHERTYPE & 0xff) ||
             memcmp(payload, "RX3C", 4) != 0 ||
-            payload[4] != RX3_S3_CONFIG_VERSION ||
-            payload[5] != (opcode | RX3_S3_CONFIG_RESPONSE_BIT) ||
-            payload[7] != 0 ||
-            payload[8] != (request_id >> 8) ||
-            payload[9] != (request_id & 0xff)) {
+            payload[4] != (opcode | RX3_S3_CONFIG_RESPONSE_BIT) ||
+            payload[6] != (request_id >> 8) ||
+            payload[7] != (request_id & 0xff)) {
             continue;
         }
-        const size_t declared = ((size_t)payload[10] << 8) | payload[11];
+        const size_t declared = ((size_t)payload[8] << 8) | payload[9];
         if (declared > (size_t)received - ETH_HLEN - RX3_S3_CONFIG_HEADER_SIZE) {
             continue;
         }
-        if (payload[6] != RX3_S3_CONFIG_OK) {
-            fprintf(stderr, "S3 rejected command with status %u\n", payload[6]);
+        if (payload[5] != RX3_S3_CONFIG_OK) {
+            fprintf(stderr, "S3 rejected command with status %u\n", payload[5]);
             exit(EXIT_FAILURE);
         }
         return declared;
@@ -193,14 +189,11 @@ static void print_status(const endpoint_t *endpoint)
     }
     char ssid[RX3_S3_CONFIG_SSID_MAX_LENGTH + 1] = {0};
     memcpy(ssid, body + RX3_S3_CONFIG_STATUS_FIXED_SIZE, body[8]);
-    printf("wifi=%s ncm=%s rssi=%d credentials=%s password=%s override=%s "
+    printf("wifi=%s rssi=%d password=%s "
            "mac=%02x:%02x:%02x:%02x:%02x:%02x ssid=%s\n",
            body[0] & RX3_S3_CONFIG_FLAG_WIFI_CONNECTED ? "connected" : "disconnected",
-           body[0] & RX3_S3_CONFIG_FLAG_NCM_LINK_UP ? "up" : "down",
            (signed char)body[1],
-           body[0] & RX3_S3_CONFIG_FLAG_CREDENTIALS_CONFIGURED ? "set" : "unset",
            body[0] & RX3_S3_CONFIG_FLAG_PASSWORD_SET ? "set" : "unset",
-           body[0] & RX3_S3_CONFIG_FLAG_SAVED_OVERRIDE ? "saved" : "fallback",
            body[2], body[3], body[4], body[5], body[6], body[7], ssid);
 }
 

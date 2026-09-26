@@ -23,17 +23,15 @@ bool rx3_config_parse_request(const uint8_t *packet,
         return false;
     }
 
-    const uint16_t payload_length = read_u16(packet + 10);
+    const uint16_t payload_length = read_u16(packet + 8);
     if (memcmp(packet, protocol_magic, sizeof(protocol_magic)) != 0 ||
-        packet[4] != RX3_S3_CONFIG_VERSION ||
-        packet[6] != 0 ||
-        packet[7] != 0 ||
+        packet[5] != 0 ||
         payload_length > packet_length - RX3_CONFIG_HEADER_SIZE) {
         return false;
     }
 
-    request->opcode = packet[5];
-    request->request_id = read_u16(packet + 8);
+    request->opcode = packet[4];
+    request->request_id = read_u16(packet + 6);
     request->payload = packet + RX3_CONFIG_HEADER_SIZE;
     request->payload_length = payload_length;
     return true;
@@ -77,12 +75,10 @@ size_t rx3_config_write_response(uint8_t *packet,
     }
 
     memcpy(packet, protocol_magic, sizeof(protocol_magic));
-    packet[4] = RX3_S3_CONFIG_VERSION;
-    packet[5] = request->opcode | RX3_S3_CONFIG_RESPONSE_BIT;
-    packet[6] = status;
-    packet[7] = 0;
-    write_u16(packet + 8, request->request_id);
-    write_u16(packet + 10, payload_length);
+    packet[4] = request->opcode | RX3_S3_CONFIG_RESPONSE_BIT;
+    packet[5] = status;
+    write_u16(packet + 6, request->request_id);
+    write_u16(packet + 8, payload_length);
     if (payload_length != 0) {
         memcpy(packet + RX3_CONFIG_HEADER_SIZE, payload, payload_length);
     }

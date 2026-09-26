@@ -9,7 +9,7 @@ Select this module when building `autoexec.bin`, boot the RX3 with that payload,
 then hold **MENU / UTILITY**. The new section appears below the stock General
 settings.
 
-The injected library runs one background worker. It exchanges versioned private
+The injected library runs one background worker. It exchanges private
 Ethernet frames with the S3 once per second and publishes a small locked cache.
 Utility callbacks only copy cached values; they never perform USB or network
 I/O. The control plane remains available before Wi-Fi association and without a

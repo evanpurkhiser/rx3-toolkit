@@ -144,9 +144,9 @@ password.
 
 ## S3 state and control
 
-The configuration API uses packed, versioned `RX3C` messages under private
-EtherType `0x88b5`. It reports association, NCM carrier, RSSI, the shared MAC,
-active SSID, and credential-presence flags without requiring an IP address.
+The configuration API uses compact `RX3C` messages under private
+EtherType `0x88b5`. It reports association, RSSI, the shared MAC, active SSID,
+and whether a password is set without requiring an IP address.
 It accepts atomic SSID/password updates and an explicit reconnect request.
 The complete wire format lives in
 `firmware/esp32-s3-link/docs/configuration-protocol.md`.
