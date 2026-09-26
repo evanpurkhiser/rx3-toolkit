@@ -112,3 +112,16 @@ returns. **Reconnect Wi-Fi** is a separate S3 command.
 
 Each stage leaves the stock 33 rows byte-for-byte cloned and removes the table
 redirection when the shared object unloads.
+
+## Live validation
+
+The first RX3 test redirected only the six count/table literals. The Utility
+screen opened, but `rbp` exited when scrolling reached an appended row because
+the normal display path still indexed the stock descriptor array through its
+separate `0x0013d9e4` literal. Firmware data following the 33rd stock descriptor
+was interpreted as a descriptor and supplied an invalid callback pointer.
+
+The corrected broker guards and redirects all seven literals as one operation.
+On September 26, 2026, firmware 1.19 displayed the appended **ESP32-S3
+INTEGRATION** section and **WI-FI STATUS** proof row, scrolled through them, and
+kept `rbp` running. The live log reported a native item count of 35.
