@@ -26,8 +26,6 @@ CORE_STATUS_NONE=/root/pdj/rx3-status-none-selected.rgb565
 register_ready_file "$CORE_READY"
 register_diagnostic_file "$CORE_LOG"
 register_runtime_preload "$CORE_LIB"
-# The pre-split name, so a rollback also unloads an older runtime.
-register_runtime_preload /root/pdj/librx3_stems.so
 
 # NS_GetImageInfoByID: movw r3,#0x15cc -> movw r3,#0x1603. This guarded
 # pre-launch word admits four private IDs in the secondary table without
@@ -48,34 +46,6 @@ core_install_asset()
     }
 }
 
-core_normalize_preload()
-{
-    # Keep exactly one entry for the core, at the front, however many earlier
-    # insertions left behind.
-    pending=$RBP_PRELOAD
-    cleaned=""
-    while [ -n "$pending" ]; do
-        case "$pending" in
-            *:*) entry=${pending%%:*}; pending=${pending#*:} ;;
-            *)   entry=$pending; pending="" ;;
-        esac
-        [ -n "$entry" ] || continue
-        [ "$entry" = "$CORE_LIB" ] && continue
-        # The pre-split name, so an older runtime is superseded cleanly.
-        [ "$entry" = "/root/pdj/librx3_stems.so" ] && continue
-        if [ -n "$cleaned" ]; then
-            cleaned="$cleaned:$entry"
-        else
-            cleaned=$entry
-        fi
-    done
-    if [ -n "$cleaned" ]; then
-        RBP_PRELOAD="$CORE_LIB:$cleaned"
-    else
-        RBP_PRELOAD=$CORE_LIB
-    fi
-}
-
 core_prepare()
 {
     [ -r "$CORE_SRC" ] || {
@@ -91,7 +61,7 @@ core_prepare()
     }
 
     previous_preload=$RBP_PRELOAD
-    core_normalize_preload
+    ensure_preload_entry "$CORE_LIB"
     preload_changed=0
     [ "$RBP_PRELOAD" = "$previous_preload" ] || preload_changed=1
 
