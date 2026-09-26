@@ -36,7 +36,7 @@ ALLOWED = {
     "memcmp", "memcpy", "memset",
     "mmap", "mprotect", "munmap", "open",
     "pthread_create", "pthread_detach",
-    "read", "strlen", "sysconf", "usleep", "write",
+    "read", "readlink", "strlen", "sysconf", "usleep", "write",
 }
 
 # Names that must never appear, with why, so a failure explains itself.

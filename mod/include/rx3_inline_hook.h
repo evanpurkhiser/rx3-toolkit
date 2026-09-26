@@ -111,9 +111,10 @@ static int activate_hook(struct installed_hook *hook, void *replacement)
     return 0;
 }
 
-#define RX3_INSTALL_HOOK(original, hook, address, guard, replacement)          \
+#define RX3_INSTALL_PREPARED_HOOK(prepare, original, hook, address, guard,     \
+                                  replacement)                                 \
     __extension__ ({                                                           \
-        void *_rx3_trampoline = prepare_hook((hook), (address), (guard));       \
+        void *_rx3_trampoline = (prepare)((hook), (address), (guard));          \
         int _rx3_installed = 0;                                                 \
         (original) = (__typeof__(original))_rx3_trampoline;                     \
         if (_rx3_trampoline) {                                                  \
@@ -124,5 +125,9 @@ static int activate_hook(struct installed_hook *hook, void *replacement)
         }                                                                       \
         _rx3_installed;                                                         \
     })
+
+#define RX3_INSTALL_HOOK(original, hook, address, guard, replacement)          \
+    RX3_INSTALL_PREPARED_HOOK(prepare_hook, original, hook, address, guard,     \
+                              replacement)
 
 #endif /* RX3_INLINE_HOOK_H */

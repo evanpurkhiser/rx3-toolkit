@@ -944,19 +944,8 @@ static void *prepare_pc_ldr_hook(struct installed_hook *hook,
 }
 
 #define RX3_INSTALL_PC_LDR_HOOK(original, hook, address, guard, replacement)   \
-    __extension__ ({                                                           \
-        void *_rx3_trampoline = prepare_pc_ldr_hook((hook), (address),         \
-                                                     (guard));                  \
-        int _rx3_installed = 0;                                                 \
-        (original) = (__typeof__(original))_rx3_trampoline;                     \
-        if (_rx3_trampoline) {                                                  \
-            if (!activate_hook((hook), (void *)(replacement)))                 \
-                _rx3_installed = 1;                                             \
-            else                                                                \
-                (original) = 0;                                                 \
-        }                                                                       \
-        _rx3_installed;                                                         \
-    })
+    RX3_INSTALL_PREPARED_HOOK(prepare_pc_ldr_hook, original, hook, address,     \
+                              guard, replacement)
 
 /* Native overlay. NS_PALRender_DrawText receives a fully attached 0x54-byte
    NS_GlyphText. Clone a stock label from the pane the row stands in for, retain
