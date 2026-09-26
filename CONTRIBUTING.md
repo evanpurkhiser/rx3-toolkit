@@ -123,6 +123,30 @@ The generated files already follow the rules below. They are written down for wh
 - A core feature reaches libc through the names declared at the top of `rx3_core_hook.c`. Calling a new one means adding it to `ALLOWED` in `tests/test_hook_symbols.py`, and confirming `rbp` exports it. The hook is `-nostdlib`: a name `rbp` does not export is neither a link error nor a warning, the shared object simply fails to load, and every module goes silent, not just yours.
 - A module that also ships an offline patcher puts it in `tools/rx3_patcher/`, not under `mod/`. Everything under `mod/` executes on the deck. The patcher declares `MODULE_ID` so `tests/test_module_consistency.py` can prove its table and the module's `register_patch` calls agree.
 
+### Building additional kernel modules
+
+Kernel modules are generated artifacts and never belong in Git. Shared RX3
+toolchain, production-ABI, container, and validation behavior lives in
+`tools/rx3_kernel`. A feature owns only its Kconfig and Kbuild recipe in
+`tools/rx3_<module>_kernel`.
+
+Mark each generated manifest file with `"artifact": true`, then build it into
+the ignored artifact directory before packaging:
+
+```sh
+make kernel-builder
+make kernel-source FIRMWARE=1.19
+make kernel-modules \
+  MODULE=<module-id> \
+  FIRMWARE=1.19 \
+  KERNEL_SOURCE=build/kernel-source/1.19
+```
+
+The feature recipe includes a checksum-pinned, minimal production symbol
+profile containing exactly the kernel symbols its outputs import. The common
+builder prepares the published source without network access and validates
+the profile, architecture, vermagic, modversion table, and relocation model.
+
 ## Supporting another firmware build
 
 Similar-looking addresses are not evidence. A submission adding support for another RX3 firmware build must identify:
