@@ -418,6 +418,18 @@ printf '%s' "$RBP_PRELOAD"
                 self.assertIsNotNone(root.find("svg:title", namespace))
                 self.assertIsNotNone(root.find("svg:desc", namespace))
 
+    def test_example_configs_pass_the_device_validator(self):
+        examples = MODULE / "examples"
+        names = {path.name for path in examples.glob("*.json")}
+
+        self.assertEqual(names, {"equal-power.json", "linear-center-dip.json"})
+        for name in sorted(names):
+            with self.subTest(name=name):
+                payload = (examples / name).read_text(encoding="utf-8")
+                result = self._validate(payload)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(self._canonical_is_accepted_by_preload(result.stdout))
+
 
 if __name__ == "__main__":
     unittest.main()
