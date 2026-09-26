@@ -138,7 +138,10 @@ class ModGeneratorTests(unittest.TestCase):
             patch = discover_patches(root, "1.19")[0]
             artifact = patch.files[1]
             artifacts = root / "local-artifacts"
-            with self.assertRaisesRegex(ValueError, "make kernel-modules"):
+            with self.assertRaisesRegex(
+                ValueError,
+                "local-artifacts/1.19/example/example.ko",
+            ):
                 runtime_file_source(root, patch, artifact, artifacts)
 
             output = artifacts / "1.19/example/example.ko"

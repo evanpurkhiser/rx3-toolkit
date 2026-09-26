@@ -446,8 +446,7 @@ def runtime_file_source(
     if not source.is_file():
         raise ValueError(
             f"{patch.patch_id}: missing generated artifact {runtime_file.source}. "
-            "Build it with make kernel-modules MODULE="
-            f"{patch.patch_id} KERNEL_SOURCE=/path/to/prepared/kernel"
+            f"Build it into {source} before packaging"
         )
     return source
 

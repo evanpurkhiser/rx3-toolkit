@@ -123,6 +123,14 @@ The generated files already follow the rules below. They are written down for wh
 - A core feature reaches libc through the names declared at the top of `rx3_core_hook.c`. Calling a new one means adding it to `ALLOWED` in `tests/test_hook_symbols.py`, and confirming `rbp` exports it. The hook is `-nostdlib`: a name `rbp` does not export is neither a link error nor a warning, the shared object simply fails to load, and every module goes silent, not just yours.
 - A module that also ships an offline patcher puts it in `tools/rx3_patcher/`, not under `mod/`. Everything under `mod/` executes on the deck. The patcher declares `MODULE_ID` so `tests/test_module_consistency.py` can prove its table and the module's `register_patch` calls agree.
 
+### Building generated artifacts
+
+Compiled runtime files are generated outside the module source directory. Mark
+each generated manifest file with `"artifact": true` and have its build recipe
+write to `build/artifacts/<firmware>/<module>/`. Runtime packaging reads the
+file from that ignored directory. The build recipe and its original inputs
+remain in the feature's `tools/` directory.
+
 ### Building additional kernel modules
 
 Kernel modules are generated artifacts and never belong in Git. Shared RX3
@@ -130,8 +138,7 @@ toolchain, production-ABI, container, and validation behavior lives in
 `tools/rx3_kernel`. A feature owns only its Kconfig and Kbuild recipe in
 `tools/rx3_<module>_kernel`.
 
-Mark each generated manifest file with `"artifact": true`, then build it into
-the ignored artifact directory before packaging:
+Build kernel artifacts with the common runner:
 
 ```sh
 make kernel-builder
