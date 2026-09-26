@@ -103,6 +103,21 @@ kept=$(preload_without_runtime \
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_preload_entries_keep_stable_order_and_drop_duplicates(self):
+        result = run_shell(
+            r'''
+RBP_PRELOAD="/opt/vendor.so:/root/pdj/pcm.so:/root/pdj/core.so:/root/pdj/pcm.so"
+ensure_preload_entry /root/pdj/core.so || exit 10
+ensure_preload_entry /root/pdj/pcm.so || exit 11
+[ "$RBP_PRELOAD" = "/opt/vendor.so:/root/pdj/pcm.so:/root/pdj/core.so" ] || exit 12
+ensure_preload_entry /root/pdj/new.so || exit 13
+[ "$RBP_PRELOAD" = "/opt/vendor.so:/root/pdj/pcm.so:/root/pdj/core.so:/root/pdj/new.so" ] || exit 14
+remove_preload_entry /root/pdj/pcm.so || exit 15
+[ "$RBP_PRELOAD" = "/opt/vendor.so:/root/pdj/core.so:/root/pdj/new.so" ] || exit 16
+'''
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
     def test_the_launch_wait_ends_as_soon_as_every_module_is_ready(self):
         """The drive stays missing from the player until the launch is declared
