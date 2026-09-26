@@ -13,7 +13,7 @@ while IFS= read -r path; do
     [ -f "$path" ] || continue
     count=$((count + 1))
     case "$path" in
-        *.key|*.pem|*.p12|*.pfx|*.jks|*.keystore|*.UPD|*.upd|*.bin|*.iso|*.img|*.so|*.rx3stem|*.wav|*.aif|*.aiff|*.flac|*.mp3)
+        *.key|*.pem|*.p12|*.pfx|*.jks|*.keystore|*.UPD|*.upd|*.bin|*.iso|*.img|*.so|*.ko|*.rx3stem|*.wav|*.aif|*.aiff|*.flac|*.mp3)
             printf 'REJECTED sensitive or generated artifact: %s\n' "$path" >&2
             failed=1
             ;;

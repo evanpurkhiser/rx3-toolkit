@@ -25,6 +25,7 @@ class RuntimeFile:
     source: str
     target: str
     executable: bool = False
+    artifact: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,7 +112,12 @@ def discover_patches(root: pathlib.Path | None = None, firmware: str | None = No
         if not re.fullmatch(r"[a-z][a-z0-9_]*", data["namespace"]):
             raise ValueError(f"{manifest_path}: unsafe shell namespace")
         files = tuple(
-            RuntimeFile(item["source"], item["target"], bool(item.get("executable", False)))
+            RuntimeFile(
+                item["source"],
+                item["target"],
+                bool(item.get("executable", False)),
+                bool(item.get("artifact", False)),
+            )
             for item in data["files"]
         )
         build_files = tuple(data.get("build_files", []))
@@ -169,7 +175,10 @@ def _validate_patch_files(patch: PatchDefinition) -> None:
         target_path = pathlib.PurePosixPath(runtime_file.target)
         if source_path.is_absolute() or ".." in source_path.parts:
             raise ValueError(f"{patch.patch_id}: unsafe source {runtime_file.source!r}")
-        if not (patch.directory / runtime_file.source).is_file():
+        if (
+            not runtime_file.artifact
+            and not (patch.directory / runtime_file.source).is_file()
+        ):
             raise ValueError(f"{patch.patch_id}: missing {runtime_file.source}")
         if target_path.is_absolute() or ".." in target_path.parts:
             raise ValueError(f"{patch.patch_id}: unsafe target {runtime_file.target!r}")
@@ -423,6 +432,26 @@ def _load_firmware_module(root: pathlib.Path):
     return module
 
 
+def runtime_file_source(
+    root: pathlib.Path,
+    patch: PatchDefinition,
+    runtime_file: RuntimeFile,
+    artifact_directory: pathlib.Path | None = None,
+) -> pathlib.Path:
+    if not runtime_file.artifact:
+        return patch.directory / runtime_file.source
+
+    base = pathlib.Path(artifact_directory or root / "build/artifacts")
+    source = base / patch.firmware / patch.patch_id / runtime_file.source
+    if not source.is_file():
+        raise ValueError(
+            f"{patch.patch_id}: missing generated artifact {runtime_file.source}. "
+            "Build it with make kernel-modules MODULE="
+            f"{patch.patch_id} KERNEL_SOURCE=/path/to/prepared/kernel"
+        )
+    return source
+
+
 def build_runtime(
     firmware: str,
     patch_ids: Iterable[str],
@@ -431,6 +460,7 @@ def build_runtime(
     *,
     root: pathlib.Path | None = None,
     prebuilt_hook: pathlib.Path | None = None,
+    artifact_directory: pathlib.Path | None = None,
     progress: ProgressCallback | None = None,
 ) -> BuildResult:
     """Build an atomic `autoexec.bin` from selected versioned modules."""
@@ -472,7 +502,10 @@ def build_runtime(
             for runtime_file in patch.files:
                 target = destination / runtime_file.target
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(patch.directory / runtime_file.source, target)
+                source = runtime_file_source(
+                    root, patch, runtime_file, artifact_directory
+                )
+                shutil.copy2(source, target)
                 target.chmod(0o755 if runtime_file.executable else 0o644)
             if patch.arm_hook:
                 target = destination / patch.arm_hook.target

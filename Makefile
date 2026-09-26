@@ -40,7 +40,7 @@ LDFLAGS := -fuse-ld=lld -shared -nostdlib \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help hook payload-hook autoexec app payload new-module test preflight clean
+.PHONY: help hook payload-hook autoexec app payload new-module kernel-builder kernel-modules test preflight clean
 
 help:
 	@printf '%s\n' \
@@ -53,6 +53,8 @@ help:
 	  'make payload VARIANT=keyshift     assemble one variant only' \
 	  'make new-module ID=browse-lock    write the files a new module is made of' \
 	  'make new-module ID=x CORE=1       ... one that reacts while a track plays' \
+	  'make kernel-builder               build the pinned RX3 kernel toolchain' \
+	  'make kernel-modules MODULE=x KERNEL_SOURCE=/path/to/kernel' \
 	  'make test                         run source tests' \
 	  'make preflight                    inspect publishable files' \
 	  'make clean                        remove build/ only'
@@ -95,6 +97,16 @@ new-module:
 	@test -n "$(ID)" || { echo 'ID=<module-id> is required, e.g. make new-module ID=browse-lock' >&2; exit 2; }
 	$(PYTHON) -m tools.rx3_runtime.scaffold --id "$(ID)" --name "$(NAME)" \
 	  --firmware "$(FIRMWARE)" $(if $(CORE),--core,)
+
+kernel-builder:
+	podman build -t localhost/rx3-kernel-builder:bookworm tools/rx3_kernel
+
+kernel-modules:
+	@test -n "$(MODULE)" || { echo 'MODULE=<module-id> is required' >&2; exit 2; }
+	@test -n "$(KERNEL_SOURCE)" || { echo 'KERNEL_SOURCE=/path/to/prepared/kernel is required' >&2; exit 2; }
+	tools/rx3_kernel/build-modules.sh "$(FIRMWARE)" "$(KERNEL_SOURCE)" \
+	  "tools/rx3_$(subst -,_,$(MODULE))_kernel" \
+	  "$(BUILD_DIR)/artifacts/$(FIRMWARE)/$(MODULE)"
 
 test:
 	@set -e; for guard in $(MODULE_GUARDS); do $(PYTHON) "$$guard"; done
