@@ -208,6 +208,7 @@ Here is what you are choosing from:
 | **Immediate Beat Jump** | Repeated jumps fire straight away instead of waiting for the grid. Quantize, Hot Cues, loops and Beat FX are untouched | ✅ |
 | **No more wait between beatjumps** | Makes the player access audio files faster when beatjumping, so big jumps can be repeated sooner. Nothing to see, it just helps the two above | ✅ |
 | **Session logging** | Writes what happened to `RX3_RUNTIME/session.txt` on the stick. Tick it when something went wrong and you want to know why | ❌ |
+| **USB crossfader curve (prototype)** | Loads a guarded crossfader response from `rx3-crossfader.json` at the root of the stick | ❌ |
 | **Diagnostic Telnet access** | Opens a shell for inspection. You do not need this | ❌ |
 
 Some boxes tick and untick themselves, and that is on purpose: a few modules genuinely need another one to work.
