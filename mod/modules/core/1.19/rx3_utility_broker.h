@@ -43,13 +43,20 @@ static struct rx3_native_utility_table rx3_utility_table;
 static struct rx3_utility_binding rx3_utility_bindings[RX3_UTILITY_CAPACITY];
 static unsigned int rx3_utility_table_active;
 
-static const unsigned long rx3_utility_literal_slots[] = {
-    0x0013c9a8u,
-    0x0013cbccu,
-    0x0013cd1cu,
-    0x0013cf30u,
-    0x0013cfc4u,
-    0x0013d9ecu,
+struct rx3_utility_literal {
+    unsigned long slot;
+    uint32_t stock;
+    unsigned int points_to_items;
+};
+
+static const struct rx3_utility_literal rx3_utility_literals[] = {
+    {0x0013c9a8u, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
+    {0x0013cbccu, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
+    {0x0013cd1cu, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
+    {0x0013cf30u, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
+    {0x0013cfc4u, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
+    {0x0013d9e4u, (uint32_t)RX3_UTILITY_ITEMS_ADDRESS, 1u},
+    {0x0013d9ecu, (uint32_t)RX3_UTILITY_TABLE_ADDRESS, 0u},
 };
 
 static const struct rx3_utility_extension *rx3_utility_extensions[] = {
@@ -101,20 +108,36 @@ static int rx3_utility_set_value_line(void *native_item, void *line_pair)
     return 0;
 }
 
-static int rx3_utility_patch_literals(uint32_t replacement)
+static uint32_t rx3_utility_literal_replacement(
+    const struct rx3_utility_literal *literal)
+{
+    if (literal->points_to_items)
+        return (uint32_t)(unsigned long)&rx3_utility_table.items[0];
+    return (uint32_t)(unsigned long)&rx3_utility_table;
+}
+
+static int rx3_utility_patch_literals(void)
 {
     unsigned int patched = 0;
-    const uint32_t stock = (uint32_t)RX3_UTILITY_TABLE_ADDRESS;
-    const unsigned int count = sizeof(rx3_utility_literal_slots) /
-                               sizeof(rx3_utility_literal_slots[0]);
+    const unsigned int count = sizeof(rx3_utility_literals) /
+                               sizeof(rx3_utility_literals[0]);
 
     for (unsigned int i = 0; i < count; i++) {
-        uint32_t *slot = (uint32_t *)rx3_utility_literal_slots[i];
-        if (*slot != stock || write_code((unsigned long)slot, &replacement,
-                                         sizeof(replacement))) {
-            for (unsigned int undo = 0; undo < patched; undo++)
-                (void)write_code(rx3_utility_literal_slots[undo], &stock,
-                                 sizeof(stock));
+        const struct rx3_utility_literal *literal = &rx3_utility_literals[i];
+        if (*(const uint32_t *)literal->slot != literal->stock)
+            return 0;
+    }
+
+    for (unsigned int i = 0; i < count; i++) {
+        const struct rx3_utility_literal *literal = &rx3_utility_literals[i];
+        const uint32_t replacement = rx3_utility_literal_replacement(literal);
+        if (write_code(literal->slot, &replacement, sizeof(replacement))) {
+            while (patched > 0u) {
+                const struct rx3_utility_literal *undo =
+                    &rx3_utility_literals[--patched];
+                (void)write_code(undo->slot, &undo->stock,
+                                 sizeof(undo->stock));
+            }
             return 0;
         }
         patched++;
@@ -178,9 +201,7 @@ static unsigned int rx3_install_utility_extensions(void)
     if (!enabled)
         return 0;
 
-    const uint32_t replacement =
-        (uint32_t)(unsigned long)&rx3_utility_table;
-    if (!rx3_utility_patch_literals(replacement)) {
+    if (!rx3_utility_patch_literals()) {
         log_line("utility broker rejected: literal guard failed");
         return 0;
     }
@@ -196,15 +217,15 @@ static void rx3_remove_utility_extensions(void)
     if (!rx3_utility_table_active)
         return;
 
-    const uint32_t replacement = (uint32_t)RX3_UTILITY_TABLE_ADDRESS;
-    const uint32_t active = (uint32_t)(unsigned long)&rx3_utility_table;
-    const unsigned int count = sizeof(rx3_utility_literal_slots) /
-                               sizeof(rx3_utility_literal_slots[0]);
+    const unsigned int count = sizeof(rx3_utility_literals) /
+                               sizeof(rx3_utility_literals[0]);
     for (unsigned int i = 0; i < count; i++) {
-        uint32_t *slot = (uint32_t *)rx3_utility_literal_slots[i];
+        const struct rx3_utility_literal *literal = &rx3_utility_literals[i];
+        uint32_t *slot = (uint32_t *)literal->slot;
+        const uint32_t active = rx3_utility_literal_replacement(literal);
         if (*slot == active)
-            (void)write_code((unsigned long)slot, &replacement,
-                             sizeof(replacement));
+            (void)write_code(literal->slot, &literal->stock,
+                             sizeof(literal->stock));
     }
     rx3_utility_table_active = 0u;
 }

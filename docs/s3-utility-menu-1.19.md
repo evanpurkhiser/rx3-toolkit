@@ -29,7 +29,7 @@ unrelated data begins, so appending descriptors in place would corrupt the
 firmware image.
 
 The broker clones the complete stock table into its shared object, appends rows,
-and guarded-patches the six literal words used by the Utility state machine:
+and guarded-patches seven literal words used by the Utility state machine:
 
 ```text
 0x0013c9a8  Utility::Init
@@ -37,12 +37,21 @@ and guarded-patches the six literal words used by the Utility state machine:
 0x0013cd1c  Utility::ChangeItem
 0x0013cf30  Utility::FinishEdit
 0x0013cfc4  Utility::ResetEdit
-0x0013d9ec  Utility::SetDispUtilityList
+0x0013d9e4  Utility::SetDispUtilityList direct row-array pointer
+0x0013d9ec  Utility::SetDispUtilityList count/table pointer
 ```
 
-Every word must still contain `0x005140b8` before the broker writes anything.
-A failed guard restores every word already changed. This gives the core one
-owner for the firmware redirection; feature modules only register descriptors.
+The six count/table words must still contain `0x005140b8`, and the direct row
+word must contain `0x005140bc`, before the broker writes anything. A failed
+guard restores every word already changed. This gives the core one owner for
+the firmware redirection; feature modules only register descriptors.
+
+The direct row pointer is load-bearing. `UiBrowse_SetDispUtilityList` uses it on
+its normal display path rather than deriving the rows from the count address.
+Redirecting only the other six words makes the list advertise the extended
+count while still indexing the 33-row stock array. Reaching the first appended
+row then interprets unrelated firmware data as a descriptor and calls an
+invalid function pointer.
 
 The first proof clones the stock General section descriptor and the read-only
 Version row descriptor. Its value callback fills the firmware's native UTF-16

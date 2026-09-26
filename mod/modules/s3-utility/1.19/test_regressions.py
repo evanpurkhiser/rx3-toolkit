@@ -47,11 +47,12 @@ require(
             "0x0013cd1cu",
             "0x0013cf30u",
             "0x0013cfc4u",
+            "0x0013d9e4u",
             "0x0013d9ecu",
         )
     )
     and "rx3_utility_patch_literals" in BROKER,
-    "one broker must own all firmware Utility table references",
+    "one broker must own the six table references and direct row reference",
 )
 require(
     "install_hook" not in FEATURE and "write_code" not in FEATURE,
