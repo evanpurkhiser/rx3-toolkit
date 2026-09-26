@@ -26,7 +26,16 @@ for manifest in (repository / "mod/modules").glob("**/manifest.json"):
     resources.append((str(manifest), destination))
     data = json.loads(manifest.read_text(encoding="utf-8"))
     for item in data["files"]:
-        source = manifest.parent / item["source"]
+        if item.get("artifact"):
+            source = (
+                repository
+                / "build/artifacts"
+                / data["firmware"]
+                / data["id"]
+                / item["source"]
+            )
+        else:
+            source = manifest.parent / item["source"]
         source_destination = f"resources/{source.parent.relative_to(repository).as_posix()}"
         resources.append((str(source), source_destination))
     for source in data.get("build_files", []):

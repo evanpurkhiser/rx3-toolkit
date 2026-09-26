@@ -151,6 +151,11 @@ class ModGeneratorTests(unittest.TestCase):
                 runtime_file_source(root, patch, artifact, artifacts), output
             )
 
+    def test_desktop_bundle_reads_generated_artifacts_from_build_directory(self):
+        spec = (REPOSITORY / "apps/rx3-toolbox/rx3_toolbox.spec").read_text()
+        self.assertIn('if item.get("artifact"):', spec)
+        self.assertIn('/ "build/artifacts"', spec)
+
     def test_builds_selected_modules_without_external_iso_tool(self):
         codec = load_firmware_codec()
         with tempfile.TemporaryDirectory() as directory:
