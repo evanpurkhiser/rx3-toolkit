@@ -11,6 +11,7 @@ AUTOEXEC = (REPOSITORY / "mod/autoexec.sh").read_text()
 MODULE_API = (REPOSITORY / "mod/lib/module-api.sh").read_text()
 HOOK = (ROOT / "rx3_core_hook.c").read_text()
 INLINE_HOOK = (REPOSITORY / "mod/include/rx3_inline_hook.h").read_text()
+PROCESS_GUARD = (REPOSITORY / "mod/include/rx3_process.h").read_text()
 CORE_MODULE = (ROOT / "module.sh").read_text()
 CORE_MANIFEST = (ROOT / "manifest.json").read_text()
 FEATURE_API = (ROOT / "rx3_feature_api.h").read_text()
@@ -128,6 +129,18 @@ require(
     INLINE_HOOK.index("(original) = (__typeof__(original))_rx3_trampoline")
     < INLINE_HOOK.index("activate_hook((hook)"),
     "the original trampoline must be published before the live patch",
+)
+require(
+    '#include "../../../include/rx3_process.h"' in HOOK
+    and 'readlink("/proc/self/exe"' in PROCESS_GUARD
+    and 'expected[] = "/root/pdj/rbp"' in PROCESS_GUARD,
+    "inherited preloads must verify that they are running inside rbp",
+)
+initialize = HOOK.split("__attribute__((constructor)) static void initialize(void)", 1)[1]
+require(
+    initialize.index("if (!rx3_running_in_rbp())")
+    < initialize.index("install_player_innards_latch()"),
+    "the process guard must run before any fixed-address emulator hook",
 )
 require(
     'RX3_KEYSHIFT' in HOOK and 'RX3_STEMS_DIR' in HOOK

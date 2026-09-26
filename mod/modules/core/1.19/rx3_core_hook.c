@@ -119,6 +119,7 @@ typedef unsigned long pthread_t;
 extern int      open(const char *, int, ...);
 extern ssize_t  read(int, void *, size_t);
 extern ssize_t  write(int, const void *, size_t);
+extern ssize_t  readlink(const char *, char *, size_t);
 extern int      close(int);
 extern off_t    lseek(int, off_t, int);
 extern void    *mmap(void *, size_t, int, int, int, off_t);
@@ -367,6 +368,7 @@ static struct rx3_runtime_feature runtime_features[RUNTIME_FEATURE_COUNT] = {
 };
 
 #include "../../../include/rx3_inline_hook.h"
+#include "../../../include/rx3_process.h"
 
 static struct installed_hook get_stream_hook;
 static struct installed_hook load_hook;
@@ -2041,6 +2043,9 @@ static void uninstall_performance_hooks(void)
 
 __attribute__((constructor)) static void initialize(void)
 {
+    if (!rx3_running_in_rbp())
+        return;
+
     /* Each feature is a module of its own and announces itself through the
        environment its module.sh exports. The core installs either way, so that
        key shift works without sidecars and stems works without key shift. */
