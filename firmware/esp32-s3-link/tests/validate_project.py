@@ -15,6 +15,7 @@ def main() -> int:
     manifest = (ROOT / "main/idf_component.yml").read_text()
     defaults = (ROOT / "sdkconfig.defaults").read_text()
     source = (ROOT / "main/rx3_link_bridge.c").read_text()
+    protocol = (ROOT / "include/rx3_s3_config_protocol.h").read_text()
     partitions = (ROOT / "partitions.csv").read_text()
     mise = (ROOT / "mise.toml").read_text()
     ignored = (ROOT / ".gitignore").read_text().splitlines()
@@ -51,12 +52,8 @@ def main() -> int:
             "USB serial identity must remain stable")
     require(r'^CONFIG_ESP_CONSOLE_SECONDARY_NONE=y$', defaults,
             "USB Serial/JTAG must not contend with TinyUSB at runtime")
-    require(r'tud_network_link_state\(0, false\)', source,
-            "NCM carrier must start down")
-    require(r'WIFI_EVENT_STA_CONNECTED[\s\S]*set_usb_link\(true\)', source,
-            "NCM carrier must follow Wi-Fi association")
-    require(r'WIFI_EVENT_STA_DISCONNECTED[\s\S]*set_usb_link\(false\)', source,
-            "NCM carrier must drop with Wi-Fi")
+    require(r'tinyusb_net_init\(&network\)[\s\S]*set_usb_link\(true\)', source,
+            "NCM control carrier must remain available without Wi-Fi association")
     require(r'esp_wifi_internal_free_rx_buffer\(rx_buffer\)[\s\S]*tinyusb_net_send_async', source,
             "Wi-Fi RX ownership must be released before the nonblocking USB send")
     require(r'#define ETHERNET_MIN_FRAME_SIZE 60', source,
@@ -74,6 +71,13 @@ def main() -> int:
             "Wi-Fi completion callback must count both outcomes")
     require(r'esp_wifi_sta_get_ap_info\(&access_point\)[\s\S]*access_point\.rssi', source,
             "bridge status must report associated RSSI")
+    require(r'esp_wifi_set_storage\(WIFI_STORAGE_RAM\)', source,
+            "the versioned NVS blob must be the only persisted credential source")
+    require(r'wifi_credentials_save\(&command\.credentials\)[\s\S]*'
+            r's_wifi_credentials = command\.credentials', source,
+            "runtime credentials must publish only after persistence succeeds")
+    require(r'RX3_S3_CONFIG_PASSWORD_MAX_LENGTH 63', protocol,
+            "wire protocol must preserve the WPA2 passphrase limit")
     require(r'bool tud_msc_is_writable_cb\(uint8_t lun\)[\s\S]*return true;', source,
             "bootstrap disk must permit the RX3's required read-write mount")
     require(r's_rx3_boot_usb_config[\s\S]*TUD_CDC_NCM_DESCRIPTOR[\s\S]*TUD_MSC_DESCRIPTOR',

@@ -39,6 +39,8 @@ run = [
   "python tests/validate_project.py",
   "cc -std=c11 -Wall -Wextra -Werror -Imain main/bridge_config.c tests/test_bridge_config.c -o /tmp/rx3-link-test-config",
   "/tmp/rx3-link-test-config",
+  "cc -D_GNU_SOURCE -std=c11 -Wall -Wextra -Werror -Iinclude -Imain main/config_protocol.c tests/test_config_protocol.c -o /tmp/rx3-link-test-protocol",
+  "/tmp/rx3-link-test-protocol",
 ]
 
 [tasks.check]

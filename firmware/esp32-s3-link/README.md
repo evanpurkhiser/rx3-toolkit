@@ -139,14 +139,21 @@ reservation and the RX3 interface identity depend on it.
 Credentials live only in ignored `sdkconfig.local.defaults` and the ignored
 generated `sdkconfig`. Never add either file to Git.
 
+The RX3 can replace those fallback credentials through the versioned NCM
+configuration protocol. The S3 stores an SSID/password pair as one NVS blob,
+reports live association, RSSI, NCM carrier, SSID, and the shared adapter MAC,
+and never returns the password. See
+[`docs/configuration-protocol.md`](docs/configuration-protocol.md) for the wire
+format and failure semantics.
+
 ## RX3 proof-of-concept procedure
 
 Start with the RX3 bootstrap module disabled so this test isolates kernel USB
 enumeration and Ethernet behavior.
 
 1. Reserve a LAN address for the bridge MAC in the router's DHCP configuration.
-2. Connect UART logging and power the XIAO from a computer. Confirm that Wi-Fi
-   associates and the log reports `USB NCM carrier up`.
+2. Connect UART logging and power the XIAO from a computer. Confirm that the log
+   reports `USB NCM carrier up`, then records the Wi-Fi association separately.
 3. Disconnect power, attach the XIAO USB-C port to an RX3 top USB-A source port,
    and boot the RX3 with its normal debug/telnet module available separately.
 4. On the RX3, record `dmesg -w`, `ip -d link`, and `lsusb -v`. Confirm that a
@@ -162,8 +169,9 @@ enumeration and Ethernet behavior.
    traffic, including 8,292-byte datagrams, and verify byte-identical reassembly
    with no increasing drop counter.
 8. Sustain bidirectional traffic while disconnecting and reconnecting Wi-Fi.
-   NCM carrier must fall immediately, return only after association, and cause
-   the RX3 to retry DHCP rather than settle permanently on `169.254/16`.
+   NCM carrier remains up so the configuration API can recover invalid
+   credentials. Transparent LAN frames are rejected until association returns;
+   the RX3 integration renews DHCP after a successful reconnect.
 9. Load an exported track while watching the ten-second statistics line. Record
    throughput and `wifi_drop`/`usb_drop` before tuning NCM NTB sizes or counts.
 
