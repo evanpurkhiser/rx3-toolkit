@@ -424,6 +424,20 @@ failed boot attempt. The physical completion counters in the pending image will
 show whether the accepted post-settle Discover fails over the radio. Attach the
 antenna before selecting the final carrier delay or retry policy.
 
+Attaching the bundled antenna completed DHCP immediately on the same running
+firmware. The RX3 exchanged Discover, Offer, Request, and ACK with the LAN
+`dnsmasq` server and configured `10.0.0.131/24`, gateway `10.0.0.1`, and DNS
+`10.0.0.1` on `usb0`. A static ARM iperf 3.21 client then measured 4.13 Mbit/s
+from RX3 to LAN and 6.94 Mbit/s from LAN to RX3 over a single TCP stream. The
+reverse test recorded 23 retransmissions, while the S3 reported one cumulative
+Wi-Fi-to-USB queue drop. These figures establish basic viability but leave
+substantial room for RF placement, driver, buffering, and NCM tuning.
+
+The iperf client runs on firmware 1.19, but its local accounting, UDP pacing,
+and parallel-worker entropy reads are incompatible with the old kernel. The
+modern host's single-stream TCP counters are authoritative. The reproducible
+build and exact limitations are in `tools/rx3_iperf`.
+
 The application-facing kernel names remain unchanged: rear USB is `eth0` and
 the S3 is `usb0`. Three aligned guarded words select `usb0` for the application
 network stack and its independently embedded DHCP command without renaming
