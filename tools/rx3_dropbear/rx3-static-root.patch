@@ -1,0 +1,15 @@
+--- a/src/svr-auth.c
++++ b/src/svr-auth.c
+@@ -502,5 +502,13 @@ void svr_switch_user(void) {
+ 	assert(ses.authstate.authdone);
+ 
++	/* The RX3 service accepts only root keys. Its static build must not call
++	 * initgroups(), which consults the build libc's dynamic NSS modules and is
++	 * incompatible with the older firmware userspace. No credentials need to
++	 * change when both the daemon and authenticated account are already root. */
++	if (getuid() == 0 && getgid() == 0 && ses.authstate.pw_uid == 0 && ses.authstate.pw_gid == 0) {
++		return;
++	}
++
+ 	/* We can only change uid/gid as root ... */
+ 	if (getuid() == 0) {

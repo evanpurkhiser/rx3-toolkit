@@ -4,6 +4,8 @@
 /.pyinstaller-cache/
 /outputs/
 /artifacts/
+/tools/rx3_dropbear/build/
+/tools/rx3_dropbear/dist/
 *.bin
 *.so
 *.o

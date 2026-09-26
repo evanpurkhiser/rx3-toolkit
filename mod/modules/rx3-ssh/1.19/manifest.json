@@ -1,0 +1,16 @@
+{
+  "id": "rx3-ssh",
+  "name": "RX3 authenticated SSH",
+  "description": "Runs a public-key-only Dropbear root shell over the RX3 network interfaces.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 93,
+  "runtime_directory": "rx3-ssh",
+  "namespace": "rx3_ssh",
+  "requires": [],
+  "conflicts": [],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false},
+    {"source": "dropbearmulti", "target": "dropbearmulti", "executable": false}
+  ]
+}
