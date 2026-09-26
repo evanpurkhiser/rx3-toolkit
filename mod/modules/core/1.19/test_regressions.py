@@ -43,6 +43,15 @@ require(
     "runtime modules must declare an id and keep lifecycle hooks namespaced",
 )
 require(
+    "STOPPED_HOOKS" in AUTOEXEC
+    and "ROLLBACK_HOOKS" in AUTOEXEC
+    and "register_stopped_hook" in MODULE_API
+    and "register_rollback_hook" in MODULE_API
+    and AUTOEXEC.count('run_hooks "$ROLLBACK_HOOKS"') == 4,
+    "device changes made after rbp stops must have compensating hooks on every "
+    "replacement failure path",
+)
+require(
     "register_patch" in MODULE_API and "write_words patched" in AUTOEXEC,
     "the runtime orchestrator must apply guarded module registrations",
 )

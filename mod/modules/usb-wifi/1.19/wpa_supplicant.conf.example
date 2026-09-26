@@ -1,0 +1,7 @@
+ctrl_interface=/dev/shm/rx3-usb-wifi/control
+update_config=0
+
+network={
+    ssid="your-network"
+    psk="your-password"
+}
