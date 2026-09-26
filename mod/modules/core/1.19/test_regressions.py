@@ -10,6 +10,7 @@ REPOSITORY = ROOT.parents[3]
 AUTOEXEC = (REPOSITORY / "mod/autoexec.sh").read_text()
 MODULE_API = (REPOSITORY / "mod/lib/module-api.sh").read_text()
 HOOK = (ROOT / "rx3_core_hook.c").read_text()
+INLINE_HOOK = (REPOSITORY / "mod/include/rx3_inline_hook.h").read_text()
 CORE_MODULE = (ROOT / "module.sh").read_text()
 CORE_MANIFEST = (ROOT / "manifest.json").read_text()
 FEATURE_API = (ROOT / "rx3_feature_api.h").read_text()
@@ -117,6 +118,16 @@ require(
 require(
     'ensure_preload_entry "$CORE_LIB"' in CORE_MODULE,
     "reinsertion must keep one stable core entry in LD_PRELOAD",
+)
+require(
+    '#include "../../../include/rx3_inline_hook.h"' in HOOK
+    and "RX3_INSTALL_HOOK(" in HOOK,
+    "the performance core must use the shared guarded hook installer",
+)
+require(
+    INLINE_HOOK.index("(original) = (__typeof__(original))_rx3_trampoline")
+    < INLINE_HOOK.index("activate_hook((hook)"),
+    "the original trampoline must be published before the live patch",
 )
 require(
     'RX3_KEYSHIFT' in HOOK and 'RX3_STEMS_DIR' in HOOK

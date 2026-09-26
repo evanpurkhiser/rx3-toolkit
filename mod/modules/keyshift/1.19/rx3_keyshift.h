@@ -356,12 +356,13 @@ static void rx3_keyshift_start_audio(unsigned int sample_rate)
 
 static void rx3_keyshift_install(void)
 {
-    original_timestretch_operate = (timestretch_operate_fn)install_hook(
-        &timestretch_operate_hook, TIMESTRETCH_OPERATE,
-        timestretch_operate_guard, (void *)hooked_timestretch_operate);
-    original_timestretch_fgpr = (timestretch_operate_fn)install_hook(
-        &timestretch_fgpr_hook, TIMESTRETCH_FGPR_OPERATE,
-        timestretch_fgpr_guard, (void *)hooked_timestretch_fgpr);
+    (void)RX3_INSTALL_HOOK(original_timestretch_operate,
+                           &timestretch_operate_hook, TIMESTRETCH_OPERATE,
+                           timestretch_operate_guard,
+                           hooked_timestretch_operate);
+    (void)RX3_INSTALL_HOOK(original_timestretch_fgpr,
+                           &timestretch_fgpr_hook, TIMESTRETCH_FGPR_OPERATE,
+                           timestretch_fgpr_guard, hooked_timestretch_fgpr);
 }
 
 static int rx3_keyshift_ready(void)

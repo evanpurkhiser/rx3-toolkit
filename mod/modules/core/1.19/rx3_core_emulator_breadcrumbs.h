@@ -112,10 +112,9 @@ static void *hooked_player_innards_ctor(void *object, void *b, void *c,
 
 #define INSTALL_BREADCRUMB(name, address)                                     \
     do {                                                                      \
-        original_##name##_crumb = (breadcrumb_fn)install_hook(                \
-            &name##_crumb_hook, (unsigned long)(address),                     \
-            name##_crumb_guard, (void *)hooked_##name##_crumb);               \
-        if (!original_##name##_crumb)                                         \
+        if (!RX3_INSTALL_HOOK(original_##name##_crumb, &name##_crumb_hook,    \
+                              (unsigned long)(address), name##_crumb_guard,    \
+                              hooked_##name##_crumb))                          \
             log_line("breadcrumb rejected: " #name);                          \
     } while (0)
 
@@ -124,10 +123,9 @@ static void *hooked_player_innards_ctor(void *object, void *b, void *c,
    that is ordinary functionality rather than a diagnostic. */
 static void install_player_innards_latch(void)
 {
-    original_player_innards_ctor = (breadcrumb_fn)install_hook(
-        &player_innards_hook, PLAYER_INNARDS_CTOR, player_innards_guard,
-        (void *)hooked_player_innards_ctor);
-    if (!original_player_innards_ctor)
+    if (!RX3_INSTALL_HOOK(original_player_innards_ctor, &player_innards_hook,
+                          PLAYER_INNARDS_CTOR, player_innards_guard,
+                          hooked_player_innards_ctor))
         log_line("rejected: unexpected PlayerInnards prologue");
 }
 

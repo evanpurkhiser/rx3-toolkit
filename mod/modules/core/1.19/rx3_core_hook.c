@@ -366,11 +366,7 @@ static struct rx3_runtime_feature runtime_features[RUNTIME_FEATURE_COUNT] = {
     }
 };
 
-struct installed_hook {
-    unsigned long address;
-    uint8_t       original[8];
-    void         *trampoline;
-};
+#include "../../../include/rx3_inline_hook.h"
 
 static struct installed_hook get_stream_hook;
 static struct installed_hook load_hook;
@@ -902,85 +898,6 @@ static void *sidecar_loader(void *opaque)
     return 0;
 }
 
-/* Hook installation. */
-
-static void clear_instruction_cache(unsigned long first, unsigned long last)
-{
-    register unsigned long r0 __asm__("r0") = first;
-    register unsigned long r1 __asm__("r1") = last;
-    register unsigned long r2 __asm__("r2") = 0;
-    register unsigned long r7 __asm__("r7") = 0x0f0002u; /* __ARM_NR_cacheflush */
-    __asm__ volatile("svc 0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r7) : "memory");
-}
-
-static int write_code(unsigned long address, const void *bytes, size_t length)
-{
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size <= 0)
-        page_size = 4096;
-    unsigned long mask  = (unsigned long)page_size - 1u;
-    unsigned long first = address & ~mask;
-    unsigned long last  = (address + length - 1u) & ~mask;
-    size_t span = (size_t)(last - first) + (size_t)page_size;
-
-    if (mprotect((void *)first, span, PROT_READ | PROT_WRITE))
-        return -1;
-    memcpy((void *)address, bytes, length);
-    clear_instruction_cache(address, address + length);
-    if (mprotect((void *)first, span, PROT_READ | PROT_EXEC))
-        return -1;
-    return 0;
-}
-
-static void uninstall_hook(struct installed_hook *hook)
-{
-    if (!hook->address)
-        return;
-    (void)write_code(hook->address, hook->original, sizeof(hook->original));
-    if (hook->trampoline)
-        munmap(hook->trampoline, 4096);
-    memset(hook, 0, sizeof(*hook));
-}
-
-/*
- * Copy the first eight bytes into a trampoline and append an absolute jump to
- * address+8. These stolen instructions have no PC-relative dependency:
- *   getStreamAt : ldrb r12,[r0,#0x9c] ; stmdb sp!,{r4..r8,r10,lr}
- *   load        : stmdb sp!,{r4..r11,lr} ; sub sp,sp,#0x5c
- *   onKey_Pad   : ldrh r3,[r1,#8] ; stmdb sp!,{r4..r11,lr}
- */
-static void *install_hook(struct installed_hook *hook, unsigned long address,
-                          const uint8_t guard[8], void *replacement)
-{
-    if (memcmp((const void *)address, guard, 8))
-        return 0;
-
-    uint32_t *trampoline = mmap(0, 4096, PROT_READ | PROT_WRITE,
-                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (trampoline == MAP_FAILED)
-        return 0;
-    memcpy(trampoline, (const void *)address, 8);
-    trampoline[2] = 0xe51ff004;                      /* ldr pc,[pc,#-4] */
-    trampoline[3] = (uint32_t)(address + 8);
-    clear_instruction_cache((unsigned long)trampoline,
-                            (unsigned long)trampoline + 16u);
-    if (mprotect(trampoline, 4096, PROT_READ | PROT_EXEC)) {
-        munmap(trampoline, 4096);
-        return 0;
-    }
-
-    uint32_t patch[2] = {0xe51ff004, (uint32_t)(unsigned long)replacement};
-    if (write_code(address, patch, sizeof(patch))) {
-        munmap(trampoline, 4096);
-        return 0;
-    }
-
-    hook->address = address;
-    memcpy(hook->original, guard, sizeof(hook->original));
-    hook->trampoline = trampoline;
-    return trampoline;
-}
-
 #if defined(RX3_EMULATOR_BUILD)
 #include "rx3_core_emulator_breadcrumbs.h"
 #endif
@@ -988,9 +905,9 @@ static void *install_hook(struct installed_hook *hook, unsigned long address,
 /* Variant for ldr r3,[pc,#imm12] followed by push. The trampoline loads a copy
    of the original literal value, replays push, and joins address+8. This
    preserves r3 without depending on the shared object's mapped address. */
-static void *install_pc_ldr_hook(struct installed_hook *hook,
+static void *prepare_pc_ldr_hook(struct installed_hook *hook,
                                  unsigned long address,
-                                 const uint8_t guard[8], void *replacement)
+                                 const uint8_t guard[8])
 {
     if (memcmp((const void *)address, guard, 8))
         return 0;
@@ -1007,7 +924,7 @@ static void *install_pc_ldr_hook(struct installed_hook *hook,
         return 0;
     trampoline[0] = 0xe59f3008u;                    /* ldr r3,[pc,#8] */
     trampoline[1] = *(const uint32_t *)(address + 4u); /* push original */
-    trampoline[2] = 0xe51ff004u;                    /* ldr pc,[pc,#-4] */
+    trampoline[2] = RX3_ARM_LDR_PC_LITERAL;         /* ldr pc,[pc,#-4] */
     trampoline[3] = (uint32_t)(address + 8u);
     trampoline[4] = literal_value;
     clear_instruction_cache((unsigned long)trampoline,
@@ -1017,17 +934,27 @@ static void *install_pc_ldr_hook(struct installed_hook *hook,
         return 0;
     }
 
-    uint32_t patch[2] = {0xe51ff004u, (uint32_t)(unsigned long)replacement};
-    if (write_code(address, patch, sizeof(patch))) {
-        munmap(trampoline, 4096);
-        return 0;
-    }
-
     hook->address = address;
     memcpy(hook->original, guard, sizeof(hook->original));
     hook->trampoline = trampoline;
+    hook->active = 0;
     return trampoline;
 }
+
+#define RX3_INSTALL_PC_LDR_HOOK(original, hook, address, guard, replacement)   \
+    __extension__ ({                                                           \
+        void *_rx3_trampoline = prepare_pc_ldr_hook((hook), (address),         \
+                                                     (guard));                  \
+        int _rx3_installed = 0;                                                 \
+        (original) = (__typeof__(original))_rx3_trampoline;                     \
+        if (_rx3_trampoline) {                                                  \
+            if (!activate_hook((hook), (void *)(replacement)))                 \
+                _rx3_installed = 1;                                             \
+            else                                                                \
+                (original) = 0;                                                 \
+        }                                                                       \
+        _rx3_installed;                                                         \
+    })
 
 /* Native overlay. NS_PALRender_DrawText receives a fully attached 0x54-byte
    NS_GlyphText. Clone a stock label from the pane the row stands in for, retain
@@ -2145,71 +2072,68 @@ __attribute__((constructor)) static void initialize(void)
 
     /* PcmReader::load is the core deck-identity service used independently by
        both features. The remaining audio/pad hooks belong to stems alone. */
-    original_load = (load_fn)install_hook(
-        &load_hook, PCM_LOAD, load_guard, (void *)hooked_load);
-    if (!original_load) {
+    if (!RX3_INSTALL_HOOK(original_load, &load_hook, PCM_LOAD, load_guard,
+                          hooked_load)) {
         log_line("rejected: unexpected PcmReader::load prologue");
         return;
     }
 
-    original_set_beatfx_selected = (set_beatfx_selected_fn)install_hook(
-        &set_beatfx_hook, SET_BEATFX_STORAGE, set_beatfx_guard,
-        (void *)hooked_set_beatfx_selected);
-    if (!original_set_beatfx_selected) {
+    if (!RX3_INSTALL_HOOK(original_set_beatfx_selected, &set_beatfx_hook,
+                          SET_BEATFX_STORAGE, set_beatfx_guard,
+                          hooked_set_beatfx_selected)) {
         log_line("rejected: unexpected Beat FX state setter prologue");
         goto reject_performance_hooks;
     }
 
-    original_on_key_hot_cue = (on_key_pad_fn)install_hook(
-        &hot_cue_hook, ON_KEY_HOT_CUE, hot_cue_guard,
-        (void *)hooked_on_key_hot_cue);
-    original_on_key_beat_loop = (on_key_pad_fn)install_hook(
-        &beat_loop_hook, ON_KEY_BEAT_LOOP, pad_mode_guard,
-        (void *)hooked_on_key_beat_loop);
-    original_on_key_slip_loop = (on_key_pad_fn)install_hook(
-        &slip_loop_hook, ON_KEY_SLIP_LOOP, pad_mode_guard,
-        (void *)hooked_on_key_slip_loop);
-    original_on_key_beat_jump = (on_key_pad_fn)install_hook(
-        &beat_jump_hook, ON_KEY_BEAT_JUMP, pad_mode_guard,
-        (void *)hooked_on_key_beat_jump);
+    (void)RX3_INSTALL_HOOK(original_on_key_hot_cue, &hot_cue_hook,
+                           ON_KEY_HOT_CUE, hot_cue_guard,
+                           hooked_on_key_hot_cue);
+    (void)RX3_INSTALL_HOOK(original_on_key_beat_loop, &beat_loop_hook,
+                           ON_KEY_BEAT_LOOP, pad_mode_guard,
+                           hooked_on_key_beat_loop);
+    (void)RX3_INSTALL_HOOK(original_on_key_slip_loop, &slip_loop_hook,
+                           ON_KEY_SLIP_LOOP, pad_mode_guard,
+                           hooked_on_key_slip_loop);
+    (void)RX3_INSTALL_HOOK(original_on_key_beat_jump, &beat_jump_hook,
+                           ON_KEY_BEAT_JUMP, pad_mode_guard,
+                           hooked_on_key_beat_jump);
     if (!original_on_key_hot_cue || !original_on_key_beat_loop ||
         !original_on_key_slip_loop || !original_on_key_beat_jump) {
         log_line("rejected: unexpected hardware pad-mode key prologue");
         goto reject_performance_hooks;
     }
 
-    original_beatfx_xpad_ctor = (beatfx_xpad_ctor_fn)install_hook(
-        &beatfx_xpad_ctor_hook, BEATFX_XPAD_CTOR, beatfx_xpad_ctor_guard,
-        (void *)hooked_beatfx_xpad_ctor);
-    if (!original_beatfx_xpad_ctor) {
+    if (!RX3_INSTALL_HOOK(original_beatfx_xpad_ctor, &beatfx_xpad_ctor_hook,
+                          BEATFX_XPAD_CTOR, beatfx_xpad_ctor_guard,
+                          hooked_beatfx_xpad_ctor)) {
         log_line("rejected: unexpected BeatFxAndXPad constructor prologue");
         goto reject_performance_hooks;
     }
 
-    original_touch_button_on = (touch_area_fn)install_hook(
-        &touch_button_on_hook, TOUCH_BUTTON_ON, touch_button_on_guard,
-        (void *)hooked_touch_button_on);
-    original_touch_button_hold = (touch_area_hold_fn)install_hook(
-        &touch_button_hold_hook, TOUCH_BUTTON_HOLD, touch_button_hold_guard,
-        (void *)hooked_touch_button_hold);
-    original_touch_button_off = (touch_area_fn)install_hook(
-        &touch_button_off_hook, TOUCH_BUTTON_OFF, touch_button_off_guard,
-        (void *)hooked_touch_button_off);
-    original_touch_toggle_on = (touch_area_fn)install_hook(
-        &touch_toggle_on_hook, TOUCH_TOGGLE_ON, touch_toggle_on_guard,
-        (void *)hooked_touch_toggle_on);
-    original_touch_toggle_off = (touch_area_fn)install_hook(
-        &touch_toggle_off_hook, TOUCH_TOGGLE_OFF, touch_toggle_off_guard,
-        (void *)hooked_touch_toggle_off);
-    original_touch_xpad_on = (touch_area_fn)install_hook(
-        &touch_xpad_on_hook, TOUCH_XPAD_ON, touch_xpad_on_guard,
-        (void *)hooked_touch_xpad_on);
-    original_touch_xpad_off = (touch_area_fn)install_hook(
-        &touch_xpad_off_hook, TOUCH_XPAD_OFF, touch_xpad_off_guard,
-        (void *)hooked_touch_xpad_off);
-    original_touch_xpad_hold = (touch_area_hold_fn)install_hook(
-        &touch_xpad_hold_hook, TOUCH_XPAD_HOLD, touch_xpad_hold_guard,
-        (void *)hooked_touch_xpad_hold);
+    (void)RX3_INSTALL_HOOK(original_touch_button_on, &touch_button_on_hook,
+                           TOUCH_BUTTON_ON, touch_button_on_guard,
+                           hooked_touch_button_on);
+    (void)RX3_INSTALL_HOOK(original_touch_button_hold, &touch_button_hold_hook,
+                           TOUCH_BUTTON_HOLD, touch_button_hold_guard,
+                           hooked_touch_button_hold);
+    (void)RX3_INSTALL_HOOK(original_touch_button_off, &touch_button_off_hook,
+                           TOUCH_BUTTON_OFF, touch_button_off_guard,
+                           hooked_touch_button_off);
+    (void)RX3_INSTALL_HOOK(original_touch_toggle_on, &touch_toggle_on_hook,
+                           TOUCH_TOGGLE_ON, touch_toggle_on_guard,
+                           hooked_touch_toggle_on);
+    (void)RX3_INSTALL_HOOK(original_touch_toggle_off, &touch_toggle_off_hook,
+                           TOUCH_TOGGLE_OFF, touch_toggle_off_guard,
+                           hooked_touch_toggle_off);
+    (void)RX3_INSTALL_HOOK(original_touch_xpad_on, &touch_xpad_on_hook,
+                           TOUCH_XPAD_ON, touch_xpad_on_guard,
+                           hooked_touch_xpad_on);
+    (void)RX3_INSTALL_HOOK(original_touch_xpad_off, &touch_xpad_off_hook,
+                           TOUCH_XPAD_OFF, touch_xpad_off_guard,
+                           hooked_touch_xpad_off);
+    (void)RX3_INSTALL_HOOK(original_touch_xpad_hold, &touch_xpad_hold_hook,
+                           TOUCH_XPAD_HOLD, touch_xpad_hold_guard,
+                           hooked_touch_xpad_hold);
     if (!original_touch_button_on || !original_touch_button_hold ||
         !original_touch_button_off || !original_touch_toggle_on ||
         !original_touch_toggle_off || !original_touch_xpad_on ||
@@ -2218,23 +2142,20 @@ __attribute__((constructor)) static void initialize(void)
         goto reject_performance_hooks;
     }
 
-    original_draw_text = (draw_text_fn)install_hook(
-        &draw_text_hook, PAL_DRAW_TEXT, draw_text_guard, (void *)hooked_draw_text);
-    if (!original_draw_text) {
+    if (!RX3_INSTALL_HOOK(original_draw_text, &draw_text_hook, PAL_DRAW_TEXT,
+                          draw_text_guard, hooked_draw_text)) {
         log_line("rejected: unexpected NS_PALRender_DrawText prologue");
         goto reject_performance_hooks;
     }
 
-    original_draw_image = (draw_image_fn)install_hook(
-        &draw_image_hook, PAL_DRAW_IMAGE, draw_image_guard, (void *)hooked_draw_image);
-    if (!original_draw_image) {
+    if (!RX3_INSTALL_HOOK(original_draw_image, &draw_image_hook, PAL_DRAW_IMAGE,
+                          draw_image_guard, hooked_draw_image)) {
         log_line("rejected: unexpected NS_PALRender_DrawImage prologue");
         goto reject_performance_hooks;
     }
 
-    original_solve_touch = (solve_touch_fn)install_hook(
-        &touch_hook, SOLVE_TOUCH, touch_guard, (void *)hooked_solve_touch);
-    if (!original_solve_touch) {
+    if (!RX3_INSTALL_HOOK(original_solve_touch, &touch_hook, SOLVE_TOUCH,
+                          touch_guard, hooked_solve_touch)) {
         log_line("rejected: unexpected solveCoordToKey prologue");
         goto reject_performance_hooks;
     }

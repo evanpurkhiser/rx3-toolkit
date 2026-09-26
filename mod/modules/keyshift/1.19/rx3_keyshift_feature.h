@@ -12,10 +12,8 @@ static int keyshift_feature_configured(void)
 
 static int keyshift_feature_install(void)
 {
-    original_audio_start = (audio_start_fn)install_hook(
-        &audio_start_hook, AUDIO_START, audio_start_guard,
-        (void *)hooked_audio_start);
-    if (!original_audio_start)
+    if (!RX3_INSTALL_HOOK(original_audio_start, &audio_start_hook, AUDIO_START,
+                          audio_start_guard, hooked_audio_start))
         return 0;
     rx3_keyshift_install();
     return rx3_keyshift_ready();

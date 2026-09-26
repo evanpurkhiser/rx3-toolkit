@@ -201,14 +201,13 @@ static int stems_feature_configured(void)
 
 static int stems_feature_install(void)
 {
-    original_get_stream = (get_stream_fn)install_hook(
-        &get_stream_hook, GET_STREAM_AT, get_stream_guard,
-        (void *)hooked_get_stream);
-    original_on_key_pad = (on_key_pad_fn)install_hook(
-        &pad_hook, ON_KEY_PAD, pad_guard, (void *)hooked_on_key_pad);
-    original_check_slip_led = (check_slip_led_fn)install_pc_ldr_hook(
-        &slip_led_hook, CHECK_SLIP_LED, slip_led_guard,
-        (void *)hooked_check_slip_led);
+    (void)RX3_INSTALL_HOOK(original_get_stream, &get_stream_hook,
+                           GET_STREAM_AT, get_stream_guard, hooked_get_stream);
+    (void)RX3_INSTALL_HOOK(original_on_key_pad, &pad_hook, ON_KEY_PAD,
+                           pad_guard, hooked_on_key_pad);
+    (void)RX3_INSTALL_PC_LDR_HOOK(original_check_slip_led, &slip_led_hook,
+                                  CHECK_SLIP_LED, slip_led_guard,
+                                  hooked_check_slip_led);
     return original_get_stream && original_on_key_pad &&
            original_check_slip_led;
 }
