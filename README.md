@@ -209,6 +209,7 @@ Here is what you are choosing from:
 | **No more wait between beatjumps** | Makes the player access audio files faster when beatjumping, so big jumps can be repeated sooner. Nothing to see, it just helps the two above | ✅ |
 | **Session logging** | Writes what happened to `RX3_RUNTIME/session.txt` on the stick. Tick it when something went wrong and you want to know why | ❌ |
 | **Diagnostic Telnet access** | Opens a shell for inspection. You do not need this | ❌ |
+| **USB Wi-Fi** | Uses a supported RTL8188CU adapter as the player's stock Link Export network interface | ❌ |
 
 Some boxes tick and untick themselves, and that is on purpose: a few modules genuinely need another one to work.
 

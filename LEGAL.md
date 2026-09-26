@@ -11,6 +11,18 @@ In the European Union, Directive 2009/24/EC provides for this. Article 5(3) allo
 
 The work here is confined to that purpose. It targets one device and one firmware revision, it is used on hardware the operator owns, and its output is of no use to anyone who does not have that hardware in front of them.
 
+## What is distributed
+
+The toolkit may fetch and redistribute an unmodified third-party runtime
+dependency when its published licence expressly permits redistribution. Each
+such dependency is pinned by checksum, and its licence and required notices
+travel with it. Licence-specific conditions, including corresponding-source
+requirements, still apply.
+
+This exception covers independently published open-source software and
+redistributable peripheral firmware. It does not cover software, firmware, or
+assets taken from the player.
+
 ## What is not distributed
 
 Nothing in this repository, its history, or its releases contains:
@@ -18,7 +30,7 @@ Nothing in this repository, its history, or its releases contains:
 - any encryption key, or material from which one can be derived;
 - any firmware image, update package, or filesystem image of the device;
 - any binary authored by the manufacturer;
-- any font, typeface, or other licensed resource belonging to a third party.
+- any font, typeface, or other restricted third-party resource.
 
 Where the toolkit needs material of that kind, the operator produces it on their own machine and points the toolkit at it. Locations are configured locally, in files that are never committed. The project does not fetch such material, does not tell anyone where to find it, and does not accept contributions that add either capability.
 
