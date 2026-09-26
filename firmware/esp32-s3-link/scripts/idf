@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root=$(cd "$(dirname "$0")/.." && pwd)
+idf_path="$project_root/.esp-idf"
+tools_path="$project_root/.idf_tools"
+
+if [[ ! -f "$idf_path/export.sh" ]]; then
+  echo "ESP-IDF is missing; run: mise run setup" >&2
+  exit 1
+fi
+
+export IDF_PATH="$idf_path"
+export IDF_TOOLS_PATH="$tools_path"
+export SDKCONFIG_DEFAULTS="sdkconfig.defaults"
+if [[ -f "$project_root/sdkconfig.local.defaults" ]]; then
+  export SDKCONFIG_DEFAULTS="$SDKCONFIG_DEFAULTS;sdkconfig.local.defaults"
+fi
+
+# shellcheck disable=SC1091
+source "$idf_path/export.sh" >/dev/null
+exec idf.py "$@"

@@ -8,6 +8,7 @@ USB_LINK_ROOT_SHELL_PID=/tmp/rx3-usb-link-root-shell.pid
 USB_LINK_ROOT_SHELL_INTERFACE=eth0
 USB_LINK_ROOT_SHELL_ALIAS=eth0:rx3shell
 USB_LINK_ROOT_SHELL_ADDRESS=169.254.100.2
+USB_LINK_ROOT_SHELL_PEER=169.254.100.1
 
 usb_link_root_shell_address_ready()
 {
@@ -17,21 +18,25 @@ usb_link_root_shell_address_ready()
 
 usb_link_root_shell_configure_address()
 {
-    if usb_link_root_shell_address_ready; then
-        return 0
-    fi
-
     if ! ifconfig "$USB_LINK_ROOT_SHELL_INTERFACE" >/dev/null 2>&1; then
         say "USB Link root shell disabled: $USB_LINK_ROOT_SHELL_INTERFACE is unavailable"
         return 1
     fi
 
-    if ! ifconfig "$USB_LINK_ROOT_SHELL_ALIAS" "$USB_LINK_ROOT_SHELL_ADDRESS" \
-        netmask 255.255.0.0 up >/dev/null 2>&1 ||
-       ! usb_link_root_shell_address_ready; then
-        say "USB Link root shell disabled: could not add $USB_LINK_ROOT_SHELL_ADDRESS to $USB_LINK_ROOT_SHELL_INTERFACE"
-        return 1
+    if ! usb_link_root_shell_address_ready; then
+        if ! ifconfig "$USB_LINK_ROOT_SHELL_ALIAS" "$USB_LINK_ROOT_SHELL_ADDRESS" \
+            netmask 255.255.0.0 up >/dev/null 2>&1 ||
+           ! usb_link_root_shell_address_ready; then
+            say "USB Link root shell disabled: could not add $USB_LINK_ROOT_SHELL_ADDRESS to $USB_LINK_ROOT_SHELL_INTERFACE"
+            return 1
+        fi
     fi
+
+    # usb0 may independently acquire a 169.254/16 fallback. Pin replies to the
+    # server address through rear USB-B so equal connected routes cannot steal
+    # the recovery shell's return traffic.
+    route add -host "$USB_LINK_ROOT_SHELL_PEER" \
+        dev "$USB_LINK_ROOT_SHELL_INTERFACE" >/dev/null 2>&1 || true
 
     say "USB Link root shell address: $USB_LINK_ROOT_SHELL_ADDRESS/16"
 }
@@ -76,7 +81,10 @@ usb_link_root_shell_start()
         return 1
     fi
 
-    /bin/busybox telnetd -F -p 23 -l /bin/sh >/dev/null 2>&1 &
+    (
+        cd /
+        exec /bin/busybox telnetd -F -p 23 -l /bin/sh
+    ) >/dev/null 2>&1 &
     shell_pid=$!
     echo "$shell_pid" > "$USB_LINK_ROOT_SHELL_PID"
 

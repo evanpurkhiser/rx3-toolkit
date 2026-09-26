@@ -44,12 +44,12 @@ explicitly designed management channel.
 
 The S3 does not run a DHCP server in this mode. It forwards the RX3's DHCP
 broadcasts to the access point and returns the router's replies. The RX3 image
-contains `udhcpc`, and `rbp` contains an `udhcpc -i eth0` command path. The
-autoexec bootstrap should explicitly start `udhcpc` on the replacement `eth0`
-after NCM carrier rises, then wait for a non-link-local address before entering
-the mounted Link state. If no lease arrives, it should leave Link unavailable
-and retry rather than accepting the stock `169.254/16` fallback as a usable
-LAN address.
+contains `udhcpc`, and `rbp` starts it with a separately embedded interface
+argument. The autoexec bootstrap patches both the application interface and
+the DHCP command from `eth0` to `usb0`, so the stock client obtains and
+maintains the LAN lease after NCM carrier rises. A failed lease retains the
+stock `169.254/16` fallback for diagnosis but does not represent a usable LAN
+connection.
 
 This works within a Wi-Fi station's three-address constraint because exactly
 one downstream host, the RX3, uses the station's permitted MAC. It is not an
@@ -77,10 +77,10 @@ remain LAN device `0x29`, and its dbserver will report the same `0x29` identity.
 Firmware 1.19's SOURCE builder explicitly accepts PC device IDs `0x29` through
 `0x2c`, so the first S3 implementation should carry the protocol unchanged:
 
-- no IP or MAC rewriting;
-- no UDP `0x29` to `0x11` normalization;
-- no TCP dbserver broker;
-- no NAT, RPC proxy, mountd proxy, or NFS awareness.
+- preserve IP and MAC fields;
+- preserve UDP device identity `0x29`;
+- connect directly to the rekordbox dbserver;
+- forward RPC, mountd, and NFS traffic unchanged.
 
 This is a testable expectation, not an assumption that USB attachment is
 irrelevant. Capture both sides during the first Link attempt. If they show a
@@ -91,6 +91,64 @@ The existing routed translator remains the fallback if `rbp` accepts only the
 rear-USB rekordbox personality. In that design the S3 terminates each side,
 translates the captured IP, MAC, and device-ID fields on UDP 50000-50002, and
 routes the remaining unicast traffic.
+
+### RX3-side personality fallback
+
+The routed server's translation requirements do not all carry over to the
+transparent S3 topology. Its IP and MAC substitutions reconcile two separate
+subnets and two virtual endpoints. The S3 instead gives the RX3 one LAN address
+and forwards its Ethernet frames with the shared Wi-Fi/NCM MAC. Dynamic
+dbserver discovery, RPC, mountd, NFSv2, and fragmented replies can therefore
+remain byte-transparent.
+
+The first dbserver response is the one content rewrite with an isolated live
+result. The routed session registered rekordbox as USB device `0x11`, then
+received a first dbserver response naming LAN device `0x29`; the RX3 closed the
+connection. Replacing that final typed `UInt32` with `0x11` allowed menu and
+track requests to continue. This proves that mixed identities fail. It does
+not prove that a consistent `0x29` session fails.
+
+Static analysis identifies the comparison. `DBComm_OnMessage` reads the
+discovered peer ID from `message + 0x0b` at `0x00149724` and passes it to
+`DtStrm_Connect` at `0x00149774`. The handler explicitly admits IDs in the LAN
+PC range at `0x00149738`-`0x00149740` and `0x001497c4`-`0x001497cc`.
+`DtStrm_Connect` reads the first dbserver response identity from
+`response + 0x18` and compares it with the discovered ID at `0x001f5354` and
+`0x001f5394`. The successful path stores that same expected ID at
+`stream + 4`; there is no hardcoded `0x11` check. A consistent `0x29` session
+therefore follows the stock success path.
+
+Test the unmodified, consistent LAN personality first. Capture the USB NCM
+interface and Wi-Fi LAN together and verify that the following values remain
+`0x29` on both sides:
+
+- the 54-byte type `0x06` announcement at byte 36;
+- source identity fields in the type `0x11`, `0x29`, and `0x47` responses;
+- the final typed `UInt32` in the first dbserver response.
+
+If that session reaches peer registration but the RX3 rejects browsing, keep
+the S3 as a raw bridge and patch the comparison inside `rbp` with a
+firmware-guarded preload constructor. These functions are absent from
+`.dynsym`, and their internal calls use direct branches, so ordinary symbol
+interposition cannot hook them. Firmware 1.19 contains `cmp sl,r2` at virtual
+address `0x001f5394`, file offset `0x001ed394`, encoded as
+`02 00 5a e1`. Replacing it with `cmp sl,sl` (`0a 00 5a e1`) makes the existing
+conditional store record the already-learned expected ID in `stream + 4` and
+takes the existing success branch. The constructor must verify the exact
+firmware bytes, temporarily make the non-PIE text page writable, clear the
+instruction cache, and restore execute permissions.
+
+That one-instruction fallback accepts every server-ID mismatch in this connect
+handler. Enable it only when a capture proves that the transparent path still
+produces a mixed identity. A larger code-cave patch can instead permit only the
+known `0x11`/`0x29` pairing. Either patch should leave IP addresses, MAC
+addresses, port discovery, RPC, mountd, NFS, and all later dbserver messages
+unchanged.
+
+Only move this translation to the S3 if an RX3-side hook cannot be made stable.
+That fallback would require the S3 to parse UDP 50000-50002 and the initial
+dbserver stream while continuing to forward the large fragmented NFS data path
+without application-layer processing.
 
 ## RX3 USB host support
 
@@ -115,8 +173,8 @@ The first hardware test is deliberately network-only:
 2. Attach an NCM-only S3 firmware image.
 3. Give NCM the S3 Wi-Fi station MAC and run Espressif's raw frame-forwarding
    path.
-4. Keep NCM carrier down until Wi-Fi association completes, then run `udhcpc`
-   on RX3 `eth0` or apply the reserved RX3 LAN address.
+4. Keep NCM carrier down until Wi-Fi association completes, then run a manual
+   `udhcpc` probe on RX3 `usb0`.
 5. Confirm enumeration, carrier, LAN addressing, broadcast delivery, repeated
    unplug/replug, and sustained bidirectional traffic.
 6. Measure packet loss and throughput with 64-byte, 1500-byte, and fragmented
@@ -140,8 +198,9 @@ Measure the real ceiling before allocating bandwidth to PCM.
 ## Interface selection
 
 The built-in `eth0` is the RX3 i.MX6 FEC connection to the rear USB-LAN
-hardware. Static analysis confirms that `rbp` hardcodes one `eth0` string at
-`0x003fe678` across its network stack. The direct users include:
+hardware. Static analysis confirms that `rbp` hardcodes a shared `eth0` string
+at virtual address `0x003fe678` across its network stack. The direct users
+include:
 
 - `get_myip_info` at `0x00188b9c`;
 - `PcControlMacAddress::getIpAddress` at `0x002e9ca8`;
@@ -155,25 +214,21 @@ hardware. Static analysis confirms that `rbp` hardcodes one `eth0` string at
 to Pro DJ Link self-information before normal operation. The adapter name and
 MAC must therefore be final before `rbp` launches.
 
-Use the toolkit's stopped-application hook to perform a deterministic swap:
+The stock DHCP command contains a second literal at file offset `0x004d955a`:
+`udhcpc -i eth0 -T 2 -t 3 -n -q`. Its three two-second attempts explain the
+quick AutoIP fallback seen during live testing. The autoexec runtime verifies
+the complete 1.19 executable and guarded bytes at `0x003f6678`, `0x004d9558`,
+and `0x004d955c`. The latter two aligned words span the DHCP literal beginning
+at `0x004d955a`. Together they replace both instances of `eth0` with `usb0`
+before restarting `rbp`. Rear USB-B keeps its kernel name `eth0`, while NCM
+keeps `usb0`.
 
-1. Match the built-in FEC by its known MAC/topology and rename `eth0` to
-   `eth1`.
-2. Load `usbnet` and the selected NCM/ECM module.
-3. Match the S3 interface by USB VID/PID, serial, and topology.
-4. Bring both interfaces down, rename the S3 interface to `eth0`, and bring it
-   up.
-5. Obtain or apply the RX3 LAN address, then launch `rbp`.
-
-This aligns every stock code path without interposing broad libc
-`ioctl`/`if_nametoindex` calls or patching many internal helpers. Enumeration
-order is never a naming input.
-
-If the S3 is absent at boot, keep the rear FEC as `eth0` and launch the stock
-path. If the active S3 disconnects, a supervisor can stop `rbp`, restore
-`eth1` to `eth0`, and relaunch. Hot-switching interfaces underneath a
-running `rbp` is unsafe because its listener retains the original ifindex and
-Pro DJ Link retains the original self MAC.
+The prepare hook first loads the host drivers, matches the S3 by USB VID, PID,
+product string and topology, verifies that its interface is `usb0`, and waits
+for carrier. Failure aborts the runtime before the guarded word is written, so
+rear USB-B remains the stock recovery path. Hot-switching underneath a running
+`rbp` remains unsafe because its listener retains the original ifindex and Pro
+DJ Link retains the original self MAC.
 
 ## RX3 application bootstrap
 
@@ -275,13 +330,19 @@ old peer and restart discovery instead of preserving half-open state.
 Add USB functions in this order:
 
 1. NCM only.
-2. NCM plus read-only mass storage containing the RX3 module and configuration.
+2. NCM plus writable mass storage containing the RX3 module and configuration.
 3. PCM over a prioritized IP stream on the NCM interface.
 
 The final mass-storage function can make the S3 look like the toolkit drive
 while the NCM function provides networking. A composite descriptor still needs
 to be tested against the RX3 host stack; support in TinyUSB does not guarantee
 that the product's mount manager accepts every composite layout.
+
+Firmware 1.19 carries a `CONFIG_PDJ` change in `usb_set_configuration()` that
+breaks out of interface registration immediately after adding a mass-storage
+interface. The S3 descriptor must order its functions as NCM control, NCM data,
+then MSC. Espressif's default MSC-first descriptor makes the storage volume
+work while leaving no NCM interface in the RX3 sysfs tree.
 
 The S3 has a tight endpoint budget. NCM consumes an interrupt IN endpoint and a
 bulk endpoint in each direction; MSC consumes another bulk pair. Diagnostics
@@ -290,6 +351,53 @@ path should also use the existing RX3 PCM tap over a prioritized IP stream
 rather than adding UAC to the composite device. PCM16 stereo at 44.1 kHz
 consumes 1.4112 Mbit/s before framing overhead, so NFS performance must be
 measured first and bulk traffic must yield to audio and Link control frames.
+
+## Live NCM and DHCP validation
+
+The composite bridge completed its first full RX3-to-LAN test on 2026-09-25.
+Firmware 1.19 loaded the packaged `usbnet.ko` and `cdc_ncm.ko`, detected the S3
+at USB topology `2-1.2`, and created `usb0` with the S3 station MAC
+`68:ee:8f:49:64:ec`. The management module assigned `172.31.254.2/30`, and a
+LAN host at `172.31.254.1/30` opened the RX3 BusyBox root shell through Wi-Fi,
+the S3 bridge, and USB NCM.
+
+A non-applying `udhcpc` probe on `usb0` then completed the full
+discover/offer/request/ACK exchange and received `10.0.0.131/24` from the LAN
+DHCP server. Applying that lease as the secondary alias `usb0:lan` preserved the
+management address and rear USB `eth0`. The server opened the same RX3 shell at
+`10.0.0.131`, and the RX3 reached gateway `10.0.0.1` with three successful ICMP
+replies. This proves bidirectional unicast, ARP, DHCP broadcast, and DHCP reply
+traffic through the transparent bridge.
+
+The lease test deliberately omitted a default route. Link Export peers are on
+the directly connected LAN, and changing the default route is unnecessary for
+discovery, dbserver, RPC, mountd, or NFS. The production path lets the stock
+`rbp` DHCP client own the primary `usb0` address, then adds the private `/30`
+recovery address as `usb0:mgmt`.
+
+A 2026-09-26 retest without an external S3 antenna isolated the remaining
+failure. The patched `rbp` and an interactive invocation both ran the exact
+stock command `udhcpc -i usb0 -T 2 -t 3 -n -q`. Each produced three Discovers;
+the RX3 `usb0` counter and S3 `usb_rx` counter increased by three, and
+`esp_wifi_internal_tx()` returned `ESP_OK` without increasing `usb_drop`.
+Simultaneous filtered and unfiltered captures on `lan0` saw none of those DHCP
+frames. Thus the current failure is after NCM receipt and Wi-Fi driver queue
+acceptance. It is not an RX3 DHCP-client or interface-selection failure.
+
+The S3 forwarding path matches ESP-IDF 6.1's `tusb_ncm` bridge example. The same
+firmware path previously completed DORA and reached the gateway, while the
+antenna-less link later showed severe packet loss. The next firmware exposes
+physical TX completion counters (`tx_ok`, `tx_fail`) and associated `rssi` in
+`RX3STAT1`. Repeat the exact stock DHCP command after attaching the antenna. A
+rising `tx_fail` counter confirms RF delivery failure; `tx_ok` with no LAN copy
+points instead to the AP or capture path.
+
+The application-facing kernel names remain unchanged: rear USB is `eth0` and
+the S3 is `usb0`. Three aligned guarded words select `usb0` for the application
+network stack and its independently embedded DHCP command without renaming
+either interface. The first live autoexec patched only the shared network
+string, so DHCP still ran on rear `eth0` while AutoIP fallback was configured
+on `usb0`.
 
 ## Milestones
 
@@ -309,8 +417,9 @@ measured first and bulk traffic must yield to audio and Link control frames.
 
 ### 3. Redirect `rbp`
 
-- Swap the rear FEC and S3 interface names while `rbp` is stopped.
-- Configure the S3 link before the application network state begins.
+- Guard and patch the shared `rbp` interface and DHCP literals from `eth0` to
+  `usb0`.
+- Raise the S3 link before the application network state begins.
 - Add the carrier-aware mount and activation shim.
 - Verify native RX3 announcements and property requests on the S3 interface.
 
@@ -330,7 +439,9 @@ measured first and bulk traffic must yield to audio and Link control frames.
 
 ### 6. Package the device
 
-- Add read-only MSC for the module/configuration.
+- Add writable MSC for the module/configuration. Firmware 1.19's VFAT udev rule
+  mounts with `-o rw` before calling `decrypt_autoexec.sh`, so USB-level write
+  protection prevents the bootstrap from running.
 - Automate module loading and interface setup.
 - Add Wi-Fi provisioning and persistent credentials.
 - Add an explicit management channel after the transport is reliable.

@@ -1,0 +1,4 @@
+CONFIG_RX3_LINK_WIFI_SSID="replace-me"
+CONFIG_RX3_LINK_WIFI_PASSWORD="replace-me"
+# Leave empty to use the stable factory Wi-Fi station MAC.
+CONFIG_RX3_LINK_WIFI_MAC=""

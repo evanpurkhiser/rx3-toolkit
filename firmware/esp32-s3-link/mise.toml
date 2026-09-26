@@ -1,0 +1,50 @@
+[tools]
+python = "3.12.11"
+
+[tasks.setup]
+description = "Install the pinned repo-local ESP-IDF toolchain"
+run = "scripts/bootstrap-idf"
+
+[tasks.configure]
+description = "Create local Wi-Fi configuration from the example"
+run = "test -f sdkconfig.local.defaults || cp sdkconfig.local.defaults.example sdkconfig.local.defaults"
+
+[tasks.build]
+description = "Build the composite bridge and its RX3 bootstrap disk"
+run = "scripts/stage-msc && scripts/idf build && python tests/validate_disk_image.py"
+
+[tasks.flash]
+description = "Build and flash the XIAO ESP32-S3, including the bootstrap disk"
+run = "scripts/stage-msc && scripts/idf ${PORT:+-p $PORT} flash"
+
+[tasks."flash-disk"]
+description = "Update only the RX3 bootstrap disk (set PORT if needed)"
+run = "scripts/stage-msc && scripts/idf build && python tests/validate_disk_image.py && scripts/idf ${PORT:+-p $PORT} rx3disk-flash"
+
+[tasks.monitor]
+description = "Open the XIAO serial monitor (set PORT if needed)"
+run = "scripts/idf ${PORT:+-p $PORT} monitor"
+
+[tasks."flash-monitor"]
+description = "Flash and then monitor the XIAO"
+run = "scripts/stage-msc && scripts/idf ${PORT:+-p $PORT} flash monitor"
+
+[tasks.menuconfig]
+description = "Open ESP-IDF project configuration"
+run = "scripts/idf menuconfig"
+
+[tasks.test]
+description = "Run host-side project validation"
+run = [
+  "python tests/validate_project.py",
+  "cc -std=c11 -Wall -Wextra -Werror -Imain main/bridge_config.c tests/test_bridge_config.c -o /tmp/rx3-link-test-config",
+  "/tmp/rx3-link-test-config",
+]
+
+[tasks.check]
+description = "Validate configuration and build the firmware"
+depends = ["test", "build"]
+
+[tasks.clean]
+description = "Remove ESP-IDF build output"
+run = "scripts/idf fullclean"

@@ -1,0 +1,9 @@
+.esp-idf/
+.idf_tools/
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+sdkconfig.local.defaults
+msc-root/autoexec.bin
+msc-root/RX3_SSH/

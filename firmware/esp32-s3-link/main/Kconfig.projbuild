@@ -1,0 +1,35 @@
+menu "RX3 Link bridge"
+
+    config RX3_LINK_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Configure this in sdkconfig.local.defaults. The bridge does not
+            start when the SSID is empty.
+
+    config RX3_LINK_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config RX3_LINK_WIFI_MAC
+        string "Optional station MAC override"
+        default ""
+        help
+            Leave empty to use the stable factory Wi-Fi station MAC. A custom
+            value must be a locally administered unicast address such as
+            02:52:58:33:00:01. USB NCM uses this same address.
+
+    config RX3_LINK_STATS_INTERVAL_SECONDS
+        int "Statistics log interval in seconds"
+        range 1 3600
+        default 10
+
+    config RX3_LINK_WIFI_TO_USB_QUEUE_DEPTH
+        int "Wi-Fi-to-USB frame queue depth"
+        range 4 32
+        default 16
+        help
+            Bounds frames waiting for USB without blocking the Wi-Fi receive
+            task when the host disables or re-enumerates the NCM interface.
+
+endmenu

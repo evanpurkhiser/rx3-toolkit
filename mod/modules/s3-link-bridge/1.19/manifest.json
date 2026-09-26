@@ -1,0 +1,18 @@
+{
+  "id": "s3-link-bridge",
+  "name": "ESP32-S3 Link bridge (prototype)",
+  "description": "Loads the CDC-NCM host drivers and directs rbp, including its stock DHCP client, to the S3 usb0 interface.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 92,
+  "runtime_directory": "s3-link-bridge",
+  "namespace": "s3_link_bridge",
+  "requires": [],
+  "conflicts": [],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false},
+    {"source": "usbnet.ko", "target": "usbnet.ko", "executable": false},
+    {"source": "cdc_ncm.ko", "target": "cdc_ncm.ko", "executable": false},
+    {"source": "rx3-ncm-status", "target": "rx3-ncm-status", "executable": true}
+  ]
+}

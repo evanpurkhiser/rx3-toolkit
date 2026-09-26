@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root=$(cd "$(dirname "$0")/.." && pwd)
+repository_root=$(cd "$project_root/../.." && pwd)
+source_image=${AUTOEXEC:-"$repository_root/build/autoexec.bin"}
+destination="$project_root/msc-root/autoexec.bin"
+dropbear_source="$repository_root/mod/modules/rx3-ssh/1.19/dropbearmulti"
+dropbear_destination="$project_root/msc-root/RX3_SSH/dropbearmulti"
+
+if [[ ! -f "$source_image" ]]; then
+  echo "RX3 autoexec image not found: $source_image" >&2
+  echo "Build it first or set AUTOEXEC=/path/to/autoexec.bin" >&2
+  exit 2
+fi
+
+mkdir -p "$project_root/msc-root"
+cp "$source_image" "$destination.tmp"
+mv "$destination.tmp" "$destination"
+
+mkdir -p "$(dirname "$dropbear_destination")"
+cp "$dropbear_source" "$dropbear_destination.tmp"
+mv "$dropbear_destination.tmp" "$dropbear_destination"
+
+size=$(stat -c %s "$destination")
+printf 'Staged %s (%s bytes)\n' "$destination" "$size"
+printf 'Staged %s (%s bytes)\n' \
+  "$dropbear_destination" "$(stat -c %s "$dropbear_destination")"

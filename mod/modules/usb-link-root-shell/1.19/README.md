@@ -7,6 +7,9 @@ It uses the RX3's existing Link Export network over the rear USB-B computer
 port and leaves the stock USB gadget in place. Before starting the daemon, it
 adds `169.254.100.2/16` as the `eth0:rx3shell` secondary address. The primary
 Link Export address remains intact, so the firmware can continue managing it.
+The module pins the server peer `169.254.100.1/32` to `eth0`. This keeps shell
+replies on rear USB-B if the S3-side `usb0` simultaneously acquires a competing
+`169.254/16` AutoIP route.
 
 The toolkit keeps the foreground daemon's process ID in `/tmp`. Reinserting the
 drive during the same boot recognizes the owned listener and leaves it running.
