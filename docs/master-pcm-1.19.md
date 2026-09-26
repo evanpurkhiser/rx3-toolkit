@@ -255,3 +255,34 @@ Both channels contained signal, with overall peaks of -13.38 dBFS left and
 -11.64 dBFS right. FFmpeg decoded the complete WAV without errors. Channel
 identity and microphone-setting behavior still require controlled source
 tests.
+
+## FLAC compression measurement
+
+The active 18.158-second portion of that capture contains 800,774 stereo
+PCM16 frames and occupies 3,203,174 bytes as WAV. FLAC 1.5.0 produced these
+results:
+
+| FLAC level | Bytes | PCM size | Saved | Average bit rate |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 1,937,733 | 60.5% | 39.5% | 854 kbit/s |
+| 1 | 1,868,295 | 58.3% | 41.7% | 823 kbit/s |
+| 3 | 1,848,245 | 57.7% | 42.3% | 814 kbit/s |
+| 5 | 1,767,826 | 55.2% | 44.8% | 779 kbit/s |
+| 8 | 1,740,548 | 54.3% | 45.7% | 767 kbit/s |
+
+The full 56.658-second capture shrinks from 9,994,540 bytes to 1,959,322
+bytes at level 0 because 38.5 seconds are digital silence. That 80.4% saving
+does not represent continuous program audio. A zero-run record in the stream
+protocol can represent idle periods cheaply without invoking a codec.
+
+Level 0 cuts active-audio traffic from 1.4112 Mbit/s to about 0.854 Mbit/s.
+Level 8 saves only another 87 kbit/s. The host benchmark cannot predict ARM
+CPU use, but it shows that the fastest preset captures most of the available
+compression and is the appropriate first live benchmark.
+
+Firmware 1.19 already ships ARM EABI5 `libFLAC.so.8.3.0`, identified as
+reference libFLAC 1.3.3. Its exported API includes streaming encoder creation,
+compression-level selection, interleaved processing, and finish functions.
+The RX3 can therefore measure presets against the actual audio workload without
+installing a codec library. The i.MX6 VPU does not accelerate FLAC; encoding
+uses a Cortex-A9 core.
