@@ -1,0 +1,23 @@
+{
+  "id": "framebuffer-stream",
+  "name": "Framebuffer stream",
+  "description": "Streams compressed framebuffer deltas over TCP.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 92,
+  "runtime_directory": "framebuffer-stream",
+  "namespace": "framebuffer_stream",
+  "requires": [],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "arm_hook": {
+    "source": "rx3_framebuffer_stream.c",
+    "target": "librx3_framebuffer_stream.so"
+  }
+}
