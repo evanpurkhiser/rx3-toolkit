@@ -390,7 +390,20 @@ antenna-less link later showed severe packet loss. The next firmware exposes
 physical TX completion counters (`tx_ok`, `tx_fail`) and associated `rssi` in
 `RX3STAT1`. Repeat the exact stock DHCP command after attaching the antenna. A
 rising `tx_fail` counter confirms RF delivery failure; `tx_ok` with no LAN copy
-points instead to the AP or capture path.
+points instead to the AP or capture path. Before interpreting those counters,
+confirm that the running image reports all three fields and matches the staged
+build hash. Compare the source MAC in the RX3-side DHCP frame with the S3
+station MAC as well; both sides of this one-host bridge must use the same MAC.
+
+An offline audit against ESP-IDF 6.1's `tusb_ncm` and `sta2eth` examples found
+no missing network-stack step in the transmit path. Both examples call
+`esp_wifi_internal_tx(WIFI_IF_STA, buffer, len)` directly from the USB receive
+callback. That API copies the input buffer, so TinyUSB may release its receive
+NTB after the callback. It returns an error when the station is disconnected or
+its transmit buffers are exhausted, which the bridge already records in
+`last_tx` and `usb_drop`. Power saving is disabled before association. These
+checks leave RF delivery, the AP path, the capture point, the running image, and
+the runtime source MAC as the useful live discriminators.
 
 The application-facing kernel names remain unchanged: rear USB is `eth0` and
 the S3 is `usb0`. Three aligned guarded words select `usb0` for the application
