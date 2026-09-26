@@ -95,7 +95,7 @@ Each feature is a directory under a firmware version, described by a `manifest.j
 A file with `"artifact": true` is read from
 `build/artifacts/<firmware>/<module>/` instead of the module source directory.
 Generated artifacts stay out of Git; their feature-specific recipes use the
-shared builder under `tools/rx3_kernel`.
+corresponding source and shared infrastructure under `tools/`.
 
 The build resolves dependencies, rejects cycles and conflicts, and writes the resolved load order into the image. Asking for one feature therefore pulls in the internal core it depends on, without the caller having to know. `make new-module ID=<id>` writes a directory that already satisfies the whole of the above, described in [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-module).
 

@@ -40,12 +40,13 @@ LDFLAGS := -fuse-ld=lld -shared -nostdlib \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help hook payload-hook autoexec app payload new-module kernel-builder kernel-source kernel-modules test preflight clean
+.PHONY: help hook payload-hook dropbear autoexec app payload new-module kernel-builder kernel-source kernel-modules test preflight clean
 
 help:
 	@printf '%s\n' \
 	  'make hook                         compile the ARM EABI5 hook' \
 	  'make payload-hook                 compile the hook variant the payload ships' \
+	  'make dropbear                     build the generated RX3 SSH executable' \
 	  'make autoexec KEY=/path/key       build the default firmware 1.19 runtime' \
 	  'make autoexec KEY=... MODULES="beatjump-32bars decoder-sleep"' \
 	  'make app                          open the XDJ-RX3 Toolkit' \
@@ -74,6 +75,10 @@ $(PAYLOAD_HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS)
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
 
 payload-hook: hook $(PAYLOAD_HOOK)
+
+dropbear:
+	tools/rx3_dropbear/build.sh
+	tools/rx3_dropbear/test.sh
 
 autoexec:
 	@test -n "$(KEY)" || { echo 'KEY=/path/outside/the/repository/aes256.key is required' >&2; exit 2; }
