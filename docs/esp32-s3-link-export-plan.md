@@ -405,6 +405,25 @@ its transmit buffers are exhausted, which the bridge already records in
 checks leave RF delivery, the AP path, the capture point, the running image, and
 the runtime source MAC as the useful live discriminators.
 
+A cold boot on 2026-09-26 without the external antenna exposed two separate
+phases. The RX3 loaded `usbnet.ko` and `cdc_ncm.ko`, found the S3 at `2-1.2`,
+raised `usb0`, invoked the mounted callback, and started authenticated SSH. The
+stock DHCP attempt sent six frames to NCM, but the S3 reported
+`last_tx=259` (`ESP_ERR_INVALID_STATE`), `usb_rx=6`, and `usb_drop=6`; `rbp`
+then selected `169.254.100.236/16`. After the Wi-Fi side settled, forced traffic
+changed `last_tx` to zero without increasing `usb_drop`. A fresh invocation of
+the stock DHCP command added one accepted Discover (`usb_rx=13`,
+`usb_drop=6`), but the LAN `dnsmasq` log saw no request and no lease was
+returned. During the same session the S3 forwarded more than 350 LAN frames to
+the RX3. This demonstrates both an early transmit-readiness window and a later
+antenna-less uplink failure while downlink reception remains active.
+
+The firmware should keep NCM carrier down until the Wi-Fi transmit path has
+remained ready, then arrange a DHCP retry whenever stable association follows a
+failed boot attempt. The physical completion counters in the pending image will
+show whether the accepted post-settle Discover fails over the radio. Attach the
+antenna before selecting the final carrier delay or retry policy.
+
 The application-facing kernel names remain unchanged: rear USB is `eth0` and
 the S3 is `usb0`. Three aligned guarded words select `usb0` for the application
 network stack and its independently embedded DHCP command without renaming
