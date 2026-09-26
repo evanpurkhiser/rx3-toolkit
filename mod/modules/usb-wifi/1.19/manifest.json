@@ -1,0 +1,31 @@
+{
+  "id": "usb-wifi",
+  "name": "USB Wi-Fi",
+  "description": "Connects an Edimax 7392:7811 adapter as rbp's stock eth0 Link interface.",
+  "firmware": "1.19",
+  "default": false,
+  "order": 92,
+  "runtime_directory": "usb-wifi",
+  "namespace": "usb_wifi",
+  "requires": ["core"],
+  "conflicts": [],
+  "files": [
+    {"source": "module.sh", "target": "module.sh", "executable": false},
+    {"source": "compat-average.ko", "target": "compat-average.ko", "executable": false},
+    {"source": "cfg80211.ko", "target": "cfg80211.ko", "executable": false},
+    {"source": "mac80211.ko", "target": "mac80211.ko", "executable": false},
+    {"source": "rtlwifi.ko", "target": "rtlwifi.ko", "executable": false},
+    {"source": "rtl8192c-common.ko", "target": "rtl8192c-common.ko", "executable": false},
+    {"source": "rtl8192cu.ko", "target": "rtl8192cu.ko", "executable": false},
+    {"source": "rtlwifi/rtl8192cufw.fw", "target": "rtlwifi/rtl8192cufw.bin", "executable": false},
+    {"source": "LICENCE.rtlwifi_firmware.txt", "target": "LICENCE.rtlwifi_firmware.txt", "executable": false},
+    {"source": "licenses/COPYING.linux", "target": "licenses/COPYING.linux", "executable": false},
+    {"source": "licenses/COPYING.libnl", "target": "licenses/COPYING.libnl", "executable": false},
+    {"source": "licenses/COPYING.wpa_supplicant", "target": "licenses/COPYING.wpa_supplicant", "executable": false},
+    {"source": "licenses/COPYRIGHT.musl", "target": "licenses/COPYRIGHT.musl", "executable": false},
+    {"source": "wpa_supplicant", "target": "wpa_supplicant", "executable": true},
+    {"source": "wpa_cli", "target": "wpa_cli", "executable": true},
+    {"source": "wpa_supplicant.conf.example", "target": "wpa_supplicant.conf.example", "executable": false},
+    {"source": "rx3-ifrename", "target": "rx3-ifrename", "executable": true}
+  ]
+}

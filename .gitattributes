@@ -2,4 +2,7 @@
 *.sh text eol=lf
 *.py text eol=lf
 *.c text eol=lf
+*.fw binary
+*.ko binary
+mod/modules/usb-wifi/1.19/LICENCE.rtlwifi_firmware.txt -whitespace
 *.command text eol=lf
