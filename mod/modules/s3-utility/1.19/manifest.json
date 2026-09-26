@@ -16,9 +16,15 @@
       "source": "module.sh",
       "target": "module.sh",
       "executable": false
+    },
+    {
+      "source": "rx3-s3-config",
+      "target": "rx3-s3-config",
+      "executable": true
     }
   ],
   "build_files": [
-    "rx3_s3_utility_feature.h"
+    "rx3_s3_utility_feature.h",
+    "rx3_s3_config_client.h"
   ]
 }

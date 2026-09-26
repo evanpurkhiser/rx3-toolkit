@@ -62,6 +62,10 @@ static const struct rx3_utility_literal rx3_utility_literals[] = {
 static const struct rx3_utility_extension *rx3_utility_extensions[] = {
     &s3_utility_extension,
 };
+static uint8_t rx3_utility_extension_started[
+    sizeof(rx3_utility_extensions) / sizeof(rx3_utility_extensions[0])];
+
+static void rx3_remove_utility_extensions(void);
 
 static unsigned int rx3_utility_ascii_to_utf16(uint16_t *destination,
                                                 const char *source)
@@ -96,9 +100,10 @@ static int rx3_utility_set_value_line(void *native_item, void *line_pair)
         return 0;
 
     struct rx3_utility_binding *binding = &rx3_utility_bindings[index];
-    const char *value = binding->item && binding->item->value
-                            ? binding->item->value()
-                            : "";
+    char value[RX3_UTILITY_TEXT_CAPACITY];
+    value[0] = 0;
+    if (binding->item && binding->item->read_value)
+        binding->item->read_value(value, sizeof(value));
     rx3_utility_ascii_to_utf16(binding->value, value);
 
     void **lines = line_pair;
@@ -207,6 +212,18 @@ static unsigned int rx3_install_utility_extensions(void)
     }
 
     rx3_utility_table_active = 1u;
+    for (unsigned int i = 0; i < extension_count; i++) {
+        const struct rx3_utility_extension *extension =
+            rx3_utility_extensions[i];
+        if (!extension->configured || !extension->configured())
+            continue;
+        if (extension->start && !extension->start()) {
+            log_line("utility broker rejected: extension could not start");
+            rx3_remove_utility_extensions();
+            return 0;
+        }
+        rx3_utility_extension_started[i] = 1u;
+    }
     log_number("utility broker active: native item count = ",
                rx3_utility_table.count);
     return enabled;
@@ -228,6 +245,15 @@ static void rx3_remove_utility_extensions(void)
                              sizeof(literal->stock));
     }
     rx3_utility_table_active = 0u;
+    const unsigned int extension_count = sizeof(rx3_utility_extensions) /
+                                         sizeof(rx3_utility_extensions[0]);
+    for (unsigned int i = 0; i < extension_count; i++) {
+        const struct rx3_utility_extension *extension =
+            rx3_utility_extensions[i];
+        if (rx3_utility_extension_started[i] && extension->stop)
+            extension->stop();
+        rx3_utility_extension_started[i] = 0u;
+    }
 }
 
 #endif /* RX3_UTILITY_BROKER_H */

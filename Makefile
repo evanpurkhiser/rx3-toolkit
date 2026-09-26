@@ -22,6 +22,7 @@ EVENT_TRACER_DIR := mod/modules/event-tracer/$(FIRMWARE)
 # One directory per module, so a new module is picked up without editing this
 # file: its headers become hook prerequisites and its guards join `make test`.
 MODULE_HEADERS := $(wildcard mod/modules/*/$(FIRMWARE)/*.h)
+PROTOCOL_HEADERS := $(wildcard firmware/esp32-s3-link/include/*.h)
 MODULE_GUARDS := $(wildcard mod/modules/*/$(FIRMWARE)/test_regressions.py)
 HOOK := $(BUILD_DIR)/librx3_core.so
 TELEMETRY_HOOK := $(BUILD_DIR)/librx3_usb_telemetry.so
@@ -63,7 +64,7 @@ help:
 
 hook: $(HOOK) $(TELEMETRY_HOOK) $(EVENT_TRACER_HOOK)
 
-$(HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS)
+$(HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS) $(PROTOCOL_HEADERS)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$(CORE_DIR)/rx3_core_hook.c"
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
@@ -78,7 +79,7 @@ $(EVENT_TRACER_HOOK): $(EVENT_TRACER_DIR)/rx3_event_tracer.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$<"
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
 
-$(PAYLOAD_HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS)
+$(PAYLOAD_HOOK): $(CORE_DIR)/rx3_core_hook.c $(MODULE_HEADERS) $(PROTOCOL_HEADERS)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) -DRX3_EMULATOR_BUILD=1 $(LDFLAGS) \
 	  -o "$@" "$(CORE_DIR)/rx3_core_hook.c"

@@ -61,6 +61,44 @@ stock Utility implementation.
 Run `tools/rx3_runtime/inspect_utility_table.py` against the decrypted `rbp`
 ELF to reproduce the 33-row map and callback addresses.
 
+Each native descriptor has this measured layout:
+
+| Offset | Field | Callback contract |
+| --- | --- | --- |
+| `0x00` | UTF-16 label pointer | |
+| `0x04` | UTF-16 value-pointer array | |
+| `0x08` | Value count | |
+| `0x0c` | Original/current value | |
+| `0x10` | Staged value | Initialized to `-1` |
+| `0x14` | Editable flag | |
+| `0x18` | Initialize callback | `void initialize(descriptor *)` |
+| `0x1c` | Line callback | `int set_line(descriptor *, line_pair *)` |
+| `0x20` | Start callback | `int start_edit(descriptor *)` |
+| `0x24` | Selection callback | `int select(descriptor *, int change)` |
+| `0x28` | Modified callback | `int is_modified(descriptor *)` |
+| `0x2c` | Enter callback | `int commit(descriptor *)` |
+| `0x30` | Grey callback | `int is_grey(descriptor *)` |
+| `0x34` | Reset callback | `int reset(descriptor *)` |
+
+`UiBrowse_InitUtilityItem` at `0x0013c960` calls the initializer for every
+descriptor. `UiBrowse_StartUtilityEdit` at `0x0013c9ac` checks the editable
+flag and enters the normal selection editor only when the start callback
+returns exactly `1`. Change, finish, and reset proceed through
+`UiBrowse_ChangeUtilityItem` at `0x0013cbd8`,
+`UiBrowse_FinishUtilityEdit` at `0x0013cd24`, and
+`UiBrowse_ResetUtilityEdit` at `0x0013cf3c`.
+
+An action row uses a custom start callback which queues work and returns `0`.
+The firmware stays outside selection-edit mode and runs the row's reset
+callback. The start callback executes on the UI control path, so it must not
+perform NCM exchange, DHCP, filesystem access, or waits itself. A worker owns
+the operation and publishes the resulting status through the normal cache.
+
+Action descriptors need a valid one-entry value array and a complete set of
+reachable callbacks. Changing the read-only Version descriptor's editable bit
+is unsafe: a vendor-specific branch in `UiBrowse_StartUtilityEdit` can index a
+row's values before calling its start callback.
+
 ## Editing constraints
 
 The stock browse keyboard is available through these named firmware functions:
@@ -72,31 +110,56 @@ BrowseKeyboardUpdate                    0x00121184
 BrowseKeyboardFix                       0x001211bc
 ```
 
-Its buffer accepts 32 characters plus the terminator, which exactly covers the
-802.11 SSID limit. A WPA passphrase can contain 63 characters. Password entry
-therefore needs a larger broker-owned buffer or a staged input flow before it
-is safe to expose as an editable row. Submission also needs one central input
-hook that dispatches to the row currently being edited.
+`getKeyboardInfoPointer` at `0x00112684` returns a byte-oriented state object
+whose text buffer begins at offset `0x08` and holds 32 bytes plus a terminator.
+`UiBrowseComm_Keyboard_InputChar` rejects another character after 32 bytes,
+while the clear and copy paths use the same `0x21`-byte bound. This covers an
+ASCII SSID of the maximum 32-octet length, although it cannot represent every
+binary or UTF-8 SSID.
+
+The keyboard is coupled to the Browse state machine. `keyboardAppear` at
+`0x001038a0` requires Browse list 0, line 0 to have type `0x25` and refuses to
+open otherwise. On submit, `BrowseKeyboardFix` calls `InputCharEnter` at
+`0x00102084`, which writes command `0x21` into the global Browse command state.
+Calling `BrowseUiIf::InputKeyboard` directly from a Utility row therefore does
+not produce a safe editor.
+
+SSID editing can reuse the stock keyboard through one input-session shim owned
+by the core UI broker. The shim records the target field, prepares a controlled
+keyboard host, intercepts submit and cancel before the Browse state machine
+consumes them, and sends the accepted value to the S3 worker. Feature modules
+register the field and callbacks rather than installing their own keyboard
+hooks.
+
+Password entry needs a broker-owned custom masked editor. WPA passphrases can
+contain 63 characters, and a raw PSK representation can require 64 hexadecimal
+characters. Its buffer therefore holds 64 bytes plus a terminator. The stock
+firmware contains translated labels for SSID and Password but no reusable
+Wi-Fi page or password-masking implementation. Extending the stock keyboard
+would require redirecting its global state, patching several independent size
+constants, and replacing its display behavior. Until the custom editor exists,
+the RX3 displays only `SET` or `NOT SET`; credentials can be written through
+the packaged RX3 control command without returning or logging the stored
+password.
 
 ## S3 state and control
 
-The existing private EtherType `0x88b5` request `RX3STAT?` already returns
-association, NCM carrier, transmit counters, and RSSI without requiring an IP
-address. Extend that protocol with versioned commands rather than doing socket
-or file I/O in the UI callback:
+The configuration API uses packed, versioned `RX3C` messages under private
+EtherType `0x88b5`. It reports association, NCM carrier, RSSI, the shared MAC,
+active SSID, and credential-presence flags without requiring an IP address.
+It accepts atomic SSID/password updates and an explicit reconnect request.
+The complete wire format lives in
+`firmware/esp32-s3-link/docs/configuration-protocol.md`.
 
-```text
-RX3CFG?                 status, SSID, credential-present flag, MAC
-RX3SCAN?                begin/return bounded scan results
-RX3SET SSID=...         stage an SSID
-RX3SET PASS=...         stage a password
-RX3APPLY                 save to NVS and reconnect
-```
+A low-priority RX3 worker owns status exchanges and publishes a small locked
+snapshot once per second. Utility callbacks only copy cached strings. Losing
+the interface or a response clears transient values instead of displaying stale
+state. The password travels only in `SET_CREDENTIALS`, is stored by the S3 in
+NVS, and is represented in the menu as `SET` or `NOT SET`.
 
-A low-priority RX3 worker owns those exchanges and publishes a small cached
-snapshot. Utility callbacks only copy cached strings. The password travels only
-in the control request, is stored by the S3 in NVS, and is represented in the
-menu as `SET` or `NOT SET`.
+The packaged `/root/pdj/rx3-s3-config` command provides status, credential
+updates, and reconnect control while the editable UI is developed. Its password
+prompt disables terminal echo and clears the local buffer after the exchange.
 
 The RX3 owns DHCP. **Renew Link address** should signal the existing DHCP client
 or run the same guarded renewal path used by the S3 Link module after NCM carrier
@@ -104,11 +167,14 @@ returns. **Reconnect Wi-Fi** is a separate S3 command.
 
 ## Staged implementation
 
-1. Display a static section and value through the shared broker.
-2. Poll `RX3STAT?` on a worker and show live Wi-Fi state, RSSI, Link IP, and MAC.
-3. Add SSID editing with the stock 32-character keyboard.
-4. Add safe 63-character password input and masked credential state.
-5. Add scan, reconnect, and DHCP-renew action rows.
+The shared broker, live background cache, read-only rows, atomic credential
+write API, reconnect command, and packaged RX3 command are implemented. The
+remaining UI stages are:
+
+1. Add the central input-session shim and use the stock 32-byte keyboard for
+   SSID editing.
+2. Add the broker-owned 65-byte masked password editor.
+3. Add scan, reconnect, and DHCP-renew action rows.
 
 Each stage leaves the stock 33 rows byte-for-byte cloned and removes the table
 redirection when the shared object unloads.

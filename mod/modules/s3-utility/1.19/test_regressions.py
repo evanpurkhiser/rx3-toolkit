@@ -9,6 +9,11 @@ ROOT = Path(__file__).resolve().parent
 MODULE = (ROOT / "module.sh").read_text()
 MANIFEST = json.loads((ROOT / "manifest.json").read_text())
 FEATURE = (ROOT / "rx3_s3_utility_feature.h").read_text()
+CLIENT = (ROOT / "rx3_s3_config_client.h").read_text()
+CONFIG_SOURCE = (
+    ROOT.parents[3]
+    / "firmware/esp32-s3-link/tools/ncm-config/rx3_ncm_config.c"
+).read_text()
 BROKER = (ROOT.parent.parent / "core" / "1.19" / "rx3_utility_broker.h").read_text()
 
 
@@ -20,6 +25,20 @@ def require(condition: bool, message: str) -> None:
 require(
     "module_begin s3-utility s3_utility" in MODULE,
     "the orchestrator loads this module under the id and namespace it declares",
+)
+require(
+    any(file["target"] == "rx3-s3-config" and file["executable"]
+        for file in MANIFEST["files"])
+    and (ROOT / "rx3-s3-config").read_bytes()[:4] == b"\x7fELF"
+    and int.from_bytes((ROOT / "rx3-s3-config").read_bytes()[18:20], "little") == 40,
+    "the payload must carry the executable configuration command",
+)
+require(
+    '"       %s INTERFACE set SSID\\n"' in CONFIG_SOURCE
+    and "read_password(password)" in CONFIG_SOURCE
+    and "tcsetattr" in CONFIG_SOURCE
+    and "wipe(password" in CONFIG_SOURCE,
+    "the setter must read a non-echoed password outside the process arguments",
 )
 require(
     MANIFEST["runtime_directory"] == "s3-utility",
@@ -57,6 +76,30 @@ require(
 require(
     "install_hook" not in FEATURE and "write_code" not in FEATURE,
     "a feature contributes rows without installing competing firmware hooks",
+)
+require(
+    all(label in FEATURE for label in (
+        '"      WI-FI STATUS"', '"      SSID"', '"      PASSWORD"',
+        '"      LINK IP"', '"      ADAPTER MAC"',
+    )),
+    "the Utility extension must expose every live cached field",
+)
+require(
+    "rx3_s3_worker" in CLIENT
+    and "RX3_S3_CONFIG_GET_STATUS" in CLIENT
+    and "rx3_s3_read_snapshot" in FEATURE
+    and "rx3_s3_exchange" not in FEATURE,
+    "all NCM I/O must stay in the background client, outside UI callbacks",
+)
+require(
+    "__sync_lock_test_and_set(&rx3_s3_cache_lock" in CLIENT
+    and "next.rssi = -127" in CLIENT
+    and "memset(&next, 0, sizeof(next))" in CLIENT,
+    "cache publication must be synchronized and failed refreshes must clear state",
+)
+require(
+    "declared > length - RX3_S3_CONFIG_HEADER_SIZE" in CLIENT,
+    "the protocol parser must allow Ethernet minimum-frame padding",
 )
 
 print("ESP32-S3 utility integration regression guards: OK")

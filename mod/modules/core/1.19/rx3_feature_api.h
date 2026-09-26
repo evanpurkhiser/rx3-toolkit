@@ -44,12 +44,14 @@ enum rx3_utility_item_kind {
 struct rx3_utility_item {
     enum rx3_utility_item_kind kind;
     const char *label;
-    const char *(*value)(void);
+    void (*read_value)(char *destination, unsigned int capacity);
 };
 
 struct rx3_utility_extension {
     const char *name;
     int (*configured)(void);
+    int (*start)(void);
+    void (*stop)(void);
     unsigned int item_count;
     const struct rx3_utility_item *items;
 };
