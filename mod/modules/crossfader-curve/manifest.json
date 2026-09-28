@@ -29,10 +29,26 @@
       "source": "validate-config.awk",
       "target": "validate-config.awk",
       "executable": false
+    },
+    {
+      "source": "generate-table.awk",
+      "target": "generate-table.awk",
+      "executable": false
+    },
+    {
+      "source": "stock/mid.table",
+      "target": "stock/mid.table",
+      "executable": false
+    },
+    {
+      "source": "stock/sharp.table",
+      "target": "stock/sharp.table",
+      "executable": false
+    },
+    {
+      "source": "stock/mid-half.table",
+      "target": "stock/mid-half.table",
+      "executable": false
     }
-  ],
-  "arm_hook": {
-    "source": "rx3_crossfader_curve.c",
-    "target": "librx3_crossfader_curve.so"
-  }
+  ]
 }

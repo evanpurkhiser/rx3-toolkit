@@ -1,8 +1,9 @@
 # USB crossfader curve prototype
 
-This module replaces one firmware 1.19 crossfader lookup table in `rbp` memory.
-It never writes the `rbp` file. A restart or power cycle restores the stock
-table, and the other two selectable crossfader curves remain unchanged.
+This module replaces one firmware 1.19 crossfader lookup table in the volatile
+`/root/pdj/rbp` copy before restarting the player application. The installed
+firmware is never written. A power cycle restores the stock file, and the other
+two selectable crossfader curves remain unchanged.
 
 Place a file named `rx3-crossfader.json` at the root of the same USB drive as
 the toolkit payload. The object may be pretty-printed and its fields may appear
@@ -41,7 +42,7 @@ from 0 through 1. The list must begin with `[0, 0]`, end with `[1, 1]`, use
 strictly increasing positions, and never decrease in gain. The module linearly
 interpolates gain between points into the firmware's 1,024-entry table. Decimal
 coordinates may use at most nine digits after the decimal point so the USB
-validator and preload consume exactly the same values.
+validator and table generator consume exactly the same values.
 
 Each deck remains capped at unity gain. A curve that keeps both sides loud near
 the center can increase their summed level, just as the stock sharp curve does.
@@ -67,15 +68,21 @@ center.
 
 ![Mirrored Deck A and Deck B gain and combined power for each stock table](stock-crossfader-overlap.svg)
 
-The preload checks the complete stock table before changing memory. This
-prototype supports only the verified firmware 1.19 `rbp` whose SHA-1 is
+The runtime checks the complete 2,048-byte stock table before writing its
+replacement. The table participates in the toolkit's guarded file transaction:
+the complete `rbp` identity is normalized to stock, overlapping patches and
+foreign bytes are rejected before `rbp` stops, the write is verified, and a
+failed relaunch restores the stock range. This prototype supports only the
+verified firmware 1.19 `rbp` whose SHA-1 is
 `cf309238491e73cdbdc1f08a09f7a3177e079068`. Missing configuration leaves a
 stock session untouched. Invalid configuration aborts preparation before an
 `rbp` restart or table change.
 
 Select `crossfader-curve` when building the runtime. Configuration changes take
-effect after the module restarts `rbp`; removing the configuration disables a
-previously active preload on the next insertion.
+effect after the module restarts `rbp`. Power cycle the RX3 after changing or
+removing the JSON file. During one powered session, a different curve does not
+match either the verified stock table or the requested replacement, so the
+runtime stops without writing anything.
 
 ## Build and test
 
@@ -91,19 +98,18 @@ make autoexec \
   MODULES="crossfader-curve logging"
 ```
 
-`build/autoexec.bin` contains the ARM preload, validator, and runtime script.
-Copy it and one example configuration to the root of the USB drive. `logging`
-is optional, but useful while testing because it records the module's stock
-table guard and activation result.
+`build/autoexec.bin` contains the validator, generator, verified stock tables,
+and runtime script. Copy it and one example configuration to the root of the
+USB drive. `logging` is optional, but useful while testing because it records
+the guarded range audit and activation result.
 
 Run the focused contract suite and repository publication checks with:
 
 ```sh
-python3 -m unittest tests.test_crossfader_curve
+python3 -m unittest tests.test_crossfader_curve tests.test_guarded_patch_files
 make preflight
 ```
 
-Test custom curves at home and keep channel trims conservative. Removing
-`rx3-crossfader.json` and reinserting the toolkit drive restarts `rbp` without
-this preload. Powering off and removing `autoexec.bin` restores a completely
-stock boot because the module only changes the running process's memory.
+Test custom curves at home and keep channel trims conservative. Powering off
+and removing `autoexec.bin` restores a completely stock boot because the
+module only changes the RAM-backed runtime copy.

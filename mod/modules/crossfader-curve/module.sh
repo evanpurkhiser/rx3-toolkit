@@ -1,139 +1,100 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Installs a volatile, exact-build-gated crossfader table preload.
+# Registers a volatile, file-backed replacement for one crossfader table.
 
 module_begin crossfader-curve crossfader_curve
 
-CROSSFADER_CURVE_VERIFIED_SHA1=cf309238491e73cdbdc1f08a09f7a3177e079068
 CROSSFADER_CURVE_USB_CONFIG=$USB/rx3-crossfader.json
-CROSSFADER_CURVE_CONFIG=/root/pdj/rx3-crossfader.config
+CROSSFADER_CURVE_MODULE_ROOT=${CROSSFADER_CURVE_MODULE_ROOT:-/mnt/iso/modules/crossfader-curve}
+CROSSFADER_CURVE_VALIDATOR=$CROSSFADER_CURVE_MODULE_ROOT/validate-config.awk
+CROSSFADER_CURVE_GENERATOR=$CROSSFADER_CURVE_MODULE_ROOT/generate-table.awk
 CROSSFADER_CURVE_NORMALIZED=/tmp/rx3-crossfader.config.$$
-CROSSFADER_CURVE_SRC=/mnt/iso/modules/crossfader-curve/librx3_crossfader_curve.so
-CROSSFADER_CURVE_LIB=/root/pdj/librx3_crossfader_curve.so
-CROSSFADER_CURVE_VALIDATOR=/mnt/iso/modules/crossfader-curve/validate-config.awk
-CROSSFADER_CURVE_READY=/tmp/rx3-crossfader-curve.ready
-CROSSFADER_CURVE_LOG=/tmp/rx3-crossfader-curve.log
-CROSSFADER_CURVE_RESIDENT=0
+CROSSFADER_CURVE_ESCAPED=/tmp/rx3-crossfader.table.$$.escaped
+CROSSFADER_CURVE_PATCHED=/tmp/rx3-crossfader.table.$$.bin
 CROSSFADER_CURVE_CONFIGURED=0
+CROSSFADER_CURVE_TARGET=""
 
-register_runtime_preload "$CROSSFADER_CURVE_LIB"
-
-crossfader_curve_without_preload()
+crossfader_curve_cleanup()
 {
-    pending=$1
-    cleaned=""
-    while [ -n "$pending" ]; do
-        case "$pending" in
-            *:*) entry=${pending%%:*}; pending=${pending#*:} ;;
-            *) entry=$pending; pending="" ;;
-        esac
-        [ -n "$entry" ] || continue
-        [ "$entry" = "$CROSSFADER_CURVE_LIB" ] && continue
-        if [ -n "$cleaned" ]; then
-            cleaned="$cleaned:$entry"
-        else
-            cleaned=$entry
-        fi
-    done
-    printf '%s' "$cleaned"
+    rm -f "$CROSSFADER_CURVE_NORMALIZED" "$CROSSFADER_CURVE_ESCAPED" \
+        "$CROSSFADER_CURVE_PATCHED"
 }
 
-crossfader_curve_with_preload()
+crossfader_curve_materialize()
 {
-    cleaned=$(crossfader_curve_without_preload "$RBP_PRELOAD")
-    if [ -n "$cleaned" ]; then
-        RBP_PRELOAD="$CROSSFADER_CURVE_LIB:$cleaned"
-    else
-        RBP_PRELOAD=$CROSSFADER_CURVE_LIB
-    fi
+    : > "$CROSSFADER_CURVE_PATCHED" || return 1
+    while IFS= read -r encoded; do
+        printf "$encoded" >> "$CROSSFADER_CURVE_PATCHED" || return 1
+    done < "$CROSSFADER_CURVE_ESCAPED"
+    [ "$(wc -c < "$CROSSFADER_CURVE_PATCHED" 2>/dev/null)" = "2048" ]
 }
 
-crossfader_curve_install()
+crossfader_curve_register()
 {
-    source_file=$1
-    target_file=$2
-    temporary_file=$target_file.$$
-    cp "$source_file" "$temporary_file" 2>/dev/null || return 1
-    chmod 644 "$temporary_file"
-    mv -f "$temporary_file" "$target_file" 2>/dev/null || {
-        rm -f "$temporary_file"
-        return 1
-    }
-}
-
-crossfader_curve_prepare()
-{
-    if [ ! -e "$CROSSFADER_CURVE_USB_CONFIG" ]; then
-        cleaned=$(crossfader_curve_without_preload "$RBP_PRELOAD")
-        if [ "$cleaned" != "$RBP_PRELOAD" ]; then
-            RBP_PRELOAD=$cleaned
-            request_rbp_restart
-            say "Crossfader curve disabled: configuration removed"
-        else
-            say "Crossfader curve disabled: $CROSSFADER_CURVE_USB_CONFIG is absent"
-        fi
-        return 0
-    fi
-
-    [ "$ACCEPTED" = "$CROSSFADER_CURVE_VERIFIED_SHA1" ] || {
-        say "Crossfader curve disabled: rbp build $ACCEPTED has not been verified"
-        return 1
-    }
-    [ -r "$CROSSFADER_CURVE_SRC" ] && [ -r "$CROSSFADER_CURVE_VALIDATOR" ] || {
-        say "Crossfader curve disabled: module files are missing"
+    [ -e "$CROSSFADER_CURVE_USB_CONFIG" ] || return 0
+    [ -f "$CROSSFADER_CURVE_USB_CONFIG" ] &&
+        [ "$(wc -c < "$CROSSFADER_CURVE_USB_CONFIG" 2>/dev/null)" -le 4096 ] &&
+        [ -r "$CROSSFADER_CURVE_VALIDATOR" ] &&
+        [ -r "$CROSSFADER_CURVE_GENERATOR" ] || {
+        say "Crossfader curve rejected: configuration or generator is unreadable"
         return 1
     }
 
     awk -f "$CROSSFADER_CURVE_VALIDATOR" "$CROSSFADER_CURVE_USB_CONFIG" \
         > "$CROSSFADER_CURVE_NORMALIZED" 2>/dev/null || {
-        rm -f "$CROSSFADER_CURVE_NORMALIZED"
-        say "Crossfader curve disabled: invalid rx3-crossfader.json"
+        say "Crossfader curve rejected: invalid rx3-crossfader.json"
+        crossfader_curve_cleanup
         return 1
     }
-    read -r curve_target point_count < "$CROSSFADER_CURVE_NORMALIZED" || return 1
-    say "Crossfader curve config: target=$curve_target points=$point_count"
+    read -r CROSSFADER_CURVE_TARGET point_count \
+        < "$CROSSFADER_CURVE_NORMALIZED" || return 1
+
+    case "$CROSSFADER_CURVE_TARGET" in
+        mid)
+            offset=4299424
+            stock=$CROSSFADER_CURVE_MODULE_ROOT/stock/mid.table
+            ;;
+        sharp)
+            offset=4301472
+            stock=$CROSSFADER_CURVE_MODULE_ROOT/stock/sharp.table
+            ;;
+        mid-half)
+            offset=4303520
+            stock=$CROSSFADER_CURVE_MODULE_ROOT/stock/mid-half.table
+            ;;
+        *)
+            say "Crossfader curve rejected: normalized target is unknown"
+            crossfader_curve_cleanup
+            return 1
+            ;;
+    esac
+
+    awk -f "$CROSSFADER_CURVE_GENERATOR" "$CROSSFADER_CURVE_NORMALIZED" \
+        > "$CROSSFADER_CURVE_ESCAPED" 2>/dev/null &&
+        crossfader_curve_materialize || {
+        say "Crossfader curve rejected: table generation failed"
+        crossfader_curve_cleanup
+        return 1
+    }
+
+    register_patch_file "$offset" 2048 "$stock" "$CROSSFADER_CURVE_PATCHED" \
+        "crossfader-$CROSSFADER_CURVE_TARGET" || {
+        crossfader_curve_cleanup
+        return 1
+    }
     CROSSFADER_CURVE_CONFIGURED=1
-    register_ready_file "$CROSSFADER_CURVE_READY"
-    register_diagnostic_file "$CROSSFADER_CURVE_LOG"
-
-    previous_preload=$RBP_PRELOAD
-    crossfader_curve_with_preload
-    if preload_contains "$CROSSFADER_CURVE_LIB" &&
-       cmp -s "$CROSSFADER_CURVE_SRC" "$CROSSFADER_CURVE_LIB" &&
-       cmp -s "$CROSSFADER_CURVE_NORMALIZED" "$CROSSFADER_CURVE_CONFIG" &&
-       [ "$RBP_PRELOAD" = "$previous_preload" ] &&
-       [ "$NEED_RBP_RESTART" = "0" ]; then
-        CROSSFADER_CURVE_RESIDENT=1
-        rm -f "$CROSSFADER_CURVE_NORMALIZED"
-        say "Crossfader curve already active, rbp left untouched"
-        return 0
-    fi
-
-    rm -f "$CROSSFADER_CURVE_READY" "$CROSSFADER_CURVE_LOG"
-    crossfader_curve_install "$CROSSFADER_CURVE_SRC" "$CROSSFADER_CURVE_LIB" &&
-    crossfader_curve_install "$CROSSFADER_CURVE_NORMALIZED" "$CROSSFADER_CURVE_CONFIG" || {
-        rm -f "$CROSSFADER_CURVE_NORMALIZED"
-        say "Crossfader curve disabled: files could not be installed"
-        return 1
-    }
-    rm -f "$CROSSFADER_CURVE_NORMALIZED"
-
-    request_rbp_restart
-    say "Crossfader curve prepared: volatile in-memory table replacement"
+    say "Crossfader curve registered: target=$CROSSFADER_CURVE_TARGET points=$point_count"
 }
 
-crossfader_curve_after_launch()
+crossfader_curve_report()
 {
-    [ "$CROSSFADER_CURVE_CONFIGURED" = "1" ] || return 0
-    if [ "$CROSSFADER_CURVE_RESIDENT" = "1" ]; then
-        say "OK: crossfader curve remains active from the previous insertion"
-    elif [ -s "$CROSSFADER_CURVE_READY" ]; then
-        say "OK: crossfader curve active"
+    if [ "$CROSSFADER_CURVE_CONFIGURED" = "1" ]; then
+        say "Crossfader curve active: $CROSSFADER_CURVE_TARGET"
     else
-        say "WARNING: rbp is active but the crossfader curve is inactive"
+        say "Crossfader curve disabled: $CROSSFADER_CURVE_USB_CONFIG is absent"
     fi
-    [ -r "$CROSSFADER_CURVE_LOG" ] && cat "$CROSSFADER_CURVE_LOG" >> "$LOG" 2>/dev/null
+    crossfader_curve_cleanup
 }
 
-register_prepare_hook crossfader_curve_prepare
-register_after_launch_hook crossfader_curve_after_launch
+crossfader_curve_register || MODULE_LOAD_FAILED=1
+register_report_hook crossfader_curve_report
