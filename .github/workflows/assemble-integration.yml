@@ -5,35 +5,16 @@ name: Assemble integration branch
 on:
   workflow_dispatch:
 
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-    branches:
-      - main
-      - core/stabilize-runtime-preload-ordering
-      - core/enforce-shared-hook-installation
-      - core/reproducible-kernel-module-builds
-      - feature/usb-wifi
-      - feature/rx3-ssh
-      - feature/pcm-tcp-stream
-      - ref/link-export-activate
-      - feature/crossfader-curve
-
 permissions:
   contents: write
 
 concurrency:
-  group: assemble-full-t3u-fader
+  group: assemble-evanpurkhiser-integration
   cancel-in-progress: true
 
 jobs:
   assemble:
-    name: Rebuild full RX3 integration
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    name: Rebuild Evan's RX3 integration
     runs-on: ubuntu-24.04
 
     steps:

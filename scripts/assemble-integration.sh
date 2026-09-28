@@ -19,6 +19,7 @@ Options:
 Configuration commands:
   target BRANCH
   base BRANCH
+  workflow FILE
   merge BRANCH
   pick BRANCH BASE_COMMIT
 EOF
@@ -27,7 +28,7 @@ EOF
 remote=origin
 push=false
 validate=false
-config=.github/integration/full-t3u-fader.conf
+config=.github/integration/integration.conf
 
 while (($#)); do
     case "$1" in
@@ -68,6 +69,7 @@ git -C "$repo" remote get-url "$remote" >/dev/null
 
 target=
 base=
+workflow=
 declare -a merge_branches=()
 declare -a pick_branches=()
 declare -a pick_bases=()
@@ -84,6 +86,10 @@ while read -r command first second extra; do
         base)
             [[ -n "${first:-}" && -z "${second:-}" && -z "$base" ]] || { echo "invalid base command" >&2; exit 2; }
             base=$first
+            ;;
+        workflow)
+            [[ -n "${first:-}" && -z "${second:-}" && -z "$workflow" ]] || { echo "invalid workflow command" >&2; exit 2; }
+            workflow=$first
             ;;
         merge)
             [[ -n "${first:-}" && -z "${second:-}" ]] || { echo "invalid merge command" >&2; exit 2; }
@@ -109,6 +115,17 @@ declare -a fetch_specs=("+refs/heads/$base:refs/remotes/$remote/$base")
 for branch in "${merge_branches[@]}" "${pick_branches[@]}"; do
     fetch_specs+=("+refs/heads/$branch:refs/remotes/$remote/$branch")
 done
+
+if [[ -n "$workflow" ]]; then
+    workflow=$(realpath "$repo/$workflow")
+
+    case "$workflow" in
+        "$repo"/*) ;;
+        *) echo "workflow must be inside the repository" >&2; exit 2 ;;
+    esac
+
+    [[ -f "$workflow" ]] || { echo "workflow not found: $workflow" >&2; exit 2; }
+fi
 
 git -C "$repo" fetch --no-tags "$remote" "${fetch_specs[@]}"
 
@@ -183,6 +200,13 @@ for index in "${!pick_branches[@]}"; do
         fi
     done
 done
+
+if [[ -n "$workflow" ]]; then
+    cp "$workflow" "$worktree/.github/workflows/ci.yml"
+    git -C "$worktree" add .github/workflows/ci.yml
+    git -C "$worktree" -c commit.gpgSign=false commit \
+        -m "Configure integration CI"
+fi
 
 if "$validate"; then
     make -C "$worktree" hook test preflight
