@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0 */
-/* Forces the stock Link Export announcement on the active network. */
+/* Establishes the stock mounted and PC-certified states for Link Export. */
 
 typedef unsigned int size_t;
 typedef int ssize_t;
@@ -25,6 +25,9 @@ extern int nanosleep(const struct timespec *, struct timespec *);
 #define O_APPEND 02000
 #define GET_PC_CONTROLLER 0x0031df64u
 #define HANDLE_USB_MOUNT_MESSAGE 0x002e9700u
+#define GET_PC_CONTROL_CERT_INSTANCE 0x00367ca0u
+#define CHECK_CERT_STATUS 0x00367e1cu
+#define PC_CONTROL_CERT_SINGLETON 0x026870c4u
 #define NETWORK_MANAGER_SINGLETON 0x026873d8u
 #define SYSTEM_MANAGER_CHANGE_STATE 0x00393438u
 #define PC_CONTROLLER_VTABLE 0x004d0198u
@@ -40,6 +43,8 @@ extern int nanosleep(const struct timespec *, struct timespec *);
 typedef void *(*get_pc_controller_fn)(void);
 typedef void (*handle_usb_mount_fn)(void *, int, const void *, int,
                                     int, int, int, int);
+typedef void *(*get_pc_control_cert_fn)(void);
+typedef unsigned char (*check_cert_status_fn)(void *);
 typedef void (*change_state_fn)(void *, int);
 
 static void log_line(const char *message)
@@ -90,13 +95,34 @@ static int firmware_guards_match(void)
     static const unsigned char change_state[8] = {
         0xf0, 0x40, 0x2d, 0xe9, 0x00, 0x40, 0xa0, 0xe1,
     };
+    static const unsigned char get_cert[8] = {
+        0x54, 0x00, 0x9f, 0xe5, 0x08, 0x40, 0x2d, 0xe9,
+    };
+    static const unsigned char check_cert[8] = {
+        0x00, 0x30, 0x90, 0xe5, 0x10, 0x40, 0x2d, 0xe9,
+    };
 
     return !memcmp((const void *)GET_PC_CONTROLLER,
                    get_pc_controller, sizeof(get_pc_controller)) &&
            !memcmp((const void *)HANDLE_USB_MOUNT_MESSAGE,
                    handle_mount, sizeof(handle_mount)) &&
+           !memcmp((const void *)GET_PC_CONTROL_CERT_INSTANCE,
+                   get_cert, sizeof(get_cert)) &&
+           !memcmp((const void *)CHECK_CERT_STATUS,
+                   check_cert, sizeof(check_cert)) &&
            !memcmp((const void *)SYSTEM_MANAGER_CHANGE_STATE,
                    change_state, sizeof(change_state));
+}
+
+static int certify_pc_control(void)
+{
+    void *cert = ((get_pc_control_cert_fn)GET_PC_CONTROL_CERT_INSTANCE)();
+
+    if ((uint32_t)cert != PC_CONTROL_CERT_SINGLETON)
+        return 0;
+    (void)((check_cert_status_fn)CHECK_CERT_STATUS)(cert);
+    __sync_synchronize();
+    return *((volatile unsigned char *)cert + 0x0cu) == 1;
 }
 
 static int change_link_stop_state(int next_state)
@@ -174,6 +200,10 @@ static void *activate_link_export(void *unused)
         return 0;
     }
     log_line("link export activate: stock USB-mounted callback invoked\n");
+    if (certify_pc_control())
+        log_line("link export activate: stock PC certification asserted\n");
+    else
+        log_line("link export activate: stock PC certification failed\n");
     pause_seconds(3);
     if (change_link_stop_state(SYSTEM_STATE_DISCOVERY))
         log_line("link export activate: LinkStop resumed at Discovery\n");

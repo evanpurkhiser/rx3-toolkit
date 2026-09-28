@@ -23,9 +23,8 @@ the expected instructions, singleton pointers, vtables, and mounted result.
 The delay is a conservative startup guard rather than a protocol timeout.
 Runtime evidence is written to `/tmp/rx3-link-export-activate.log`.
 
-The captured USB-MIDI activation command maintains a separate one-second
-`PcControlCert` lease. Static analysis shows that `NetworkMonitor` gates Link
-state on the mounted flag rather than `PcController::isCertified`, so this
-module begins with the mounted callback alone. `PcControlCert::checkCertStatus`
-is the native one-shot extension if live UI evidence shows certification is
-also required.
+The shim also invokes `PcControlCert::checkCertStatus` once through the stock
+singleton. Firmware accepts an `0x11` or `0x12` Rekordbox source only when this
+certification state is active; `0x29` through `0x2c` bypass that gate as mobile
+sources. The one-shot native transition keeps PC certification active without
+emulating the rear USB-B MIDI heartbeat and its one-second lease.

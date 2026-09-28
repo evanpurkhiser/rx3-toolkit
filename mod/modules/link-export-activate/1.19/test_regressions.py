@@ -11,6 +11,7 @@ import unittest
 HERE = Path(__file__).resolve().parent
 MANIFEST = json.loads((HERE / "manifest.json").read_text())
 MODULE = (HERE / "module.sh").read_text()
+SOURCE = (HERE / "rx3_link_export_activate.c").read_text()
 
 
 class LinkExportActivateTests(unittest.TestCase):
@@ -34,6 +35,12 @@ class LinkExportActivateTests(unittest.TestCase):
         self.assertIn("link_export_activate_normalize_preload", MODULE)
         self.assertIn("request_rbp_restart", MODULE)
         self.assertIn("LINK_EXPORT_ACTIVATE_VERIFIED_SHA1=", MODULE)
+
+    def test_preload_asserts_stock_pc_certification(self) -> None:
+        self.assertIn("GET_PC_CONTROL_CERT_INSTANCE", SOURCE)
+        self.assertIn("CHECK_CERT_STATUS", SOURCE)
+        self.assertIn("certify_pc_control()", SOURCE)
+        self.assertIn("stock PC certification asserted", SOURCE)
 
 if __name__ == "__main__":
     unittest.main()
