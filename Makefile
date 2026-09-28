@@ -50,7 +50,6 @@ endif
 .DEFAULT_GOAL := help
 
 .PHONY: help hook autoexec app new-module kernel-builder kernel-source kernel-modules test preflight clean overcue-audio
-.PHONY: dropbear
 
 help:
 	@printf '%s\n' \
@@ -81,6 +80,7 @@ $(HOOK): $(CORE_DIR)/rx3_core_hook.c $(HOOK_UNITS) $(MODULE_HEADERS) $(CORE_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$(CORE_DIR)/rx3_core_hook.c" $(HOOK_UNITS)
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
 
+.PHONY: dropbear
 dropbear:
 	tools/rx3_dropbear/build.sh
 	tools/rx3_dropbear/test.sh
