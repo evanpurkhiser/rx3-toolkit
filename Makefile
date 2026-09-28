@@ -49,7 +49,8 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help hook dropbear autoexec app new-module kernel-builder kernel-source kernel-modules test preflight clean overcue-audio
+.PHONY: help hook autoexec app new-module kernel-builder kernel-source kernel-modules test preflight clean overcue-audio
+.PHONY: dropbear
 
 help:
 	@printf '%s\n' \
