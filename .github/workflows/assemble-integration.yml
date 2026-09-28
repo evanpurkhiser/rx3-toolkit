@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: MPL-2.0
+
+name: Assemble integration branch
+
+on:
+  workflow_dispatch:
+
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+      - core/stabilize-runtime-preload-ordering
+      - core/enforce-shared-hook-installation
+      - core/reproducible-kernel-module-builds
+      - feature/usb-wifi
+      - feature/rx3-ssh
+      - feature/pcm-tcp-stream
+      - ref/link-export-activate
+      - feature/crossfader-curve
+
+permissions:
+  contents: write
+
+concurrency:
+  group: assemble-full-t3u-fader
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    name: Rebuild full RX3 integration
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install source-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld file ffmpeg
+          python -m pip install -r requirements.txt
+
+      - name: Assemble, validate, and publish integration branch
+        run: scripts/assemble-integration.sh --validate --push
