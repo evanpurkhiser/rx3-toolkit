@@ -43,6 +43,9 @@ ALLOWED = {
     # Now playing. rbp imports each of these from its libc for its own
     # networking, checked in its dynamic symbol table for 1.19.
     "poll", "recv", "send", "sendto", "setsockopt", "socket", "socketpair",
+    # PCM streaming uses the player's existing TCP and timekeeping surface.
+    "__errno_location", "accept", "bind", "clock_gettime", "fcntl",
+    "inet_pton", "listen", "nanosleep", "nice", "rename", "snprintf",
 }
 
 # Names that must never appear, with why, so a failure explains itself.

@@ -1,0 +1,35 @@
+{
+  "id": "pcm-stream",
+  "name": {
+    "en": "Master PCM stream",
+    "fr": "Flux PCM principal"
+  },
+  "description": {
+    "en": "Serves a live 44.1 kHz stereo master stream over TCP.",
+    "fr": "Diffuse le mix principal stéréo à 44,1 kHz en direct par TCP."
+  },
+  "firmwares": [
+    "1.19"
+  ],
+  "default": false,
+  "order": 102,
+  "category": "streaming",
+  "runtime_directory": "pcm-stream",
+  "namespace": "pcm_stream",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "README.md",
+    "rx3_pcm_stream_module.c"
+  ],
+  "advanced": true
+}
