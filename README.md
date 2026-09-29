@@ -327,3 +327,5 @@ Pioneer DJ, AlphaTheta, rekordbox and XDJ-RX3 are trademarks of their respective
 ## Acknowledgements
 
 Thanks to the people who documented the RX3, shared tests and module ideas, built audio separation tools, and tried the early versions on their own decks. Their reports are what turn a promising demo into a mod a DJ can actually use.
+
+[USB Wi-Fi](mod/modules/usb-wifi/README.md) connects supported adapters through the stock Link Export network interface.
