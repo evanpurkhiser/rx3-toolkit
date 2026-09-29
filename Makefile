@@ -49,11 +49,12 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help hook autoexec app new-module kernel-builder kernel-source kernel-modules test preflight clean overcue-audio
+.PHONY: help hook dropbear autoexec app new-module kernel-builder kernel-source kernel-modules test preflight clean overcue-audio
 
 help:
 	@printf '%s\n' \
 	  'make hook                         compile the ARM EABI5 hook' \
+	  'make dropbear                     build the generated RX3 SSH executable' \
 	  'make autoexec KEY=/path/key       build the runtime for firmware $(FIRMWARE)' \
 	  'make autoexec KEY=... MODULES="beatjump-32bars decoder-sleep"' \
 	  'make autoexec KEY=... MODULES="x" PROFILES="x=profile"' \
@@ -78,6 +79,10 @@ $(HOOK): $(CORE_DIR)/rx3_core_hook.c $(HOOK_UNITS) $(MODULE_HEADERS) $(CORE_DIR)
 	@mkdir -p "$(BUILD_DIR)"
 	$(CC) $(CFLAGS) $(LDFLAGS) -o "$@" "$(CORE_DIR)/rx3_core_hook.c" $(HOOK_UNITS)
 	@file "$@" | grep -q 'ELF 32-bit LSB shared object, ARM, EABI5'
+
+dropbear:
+	tools/rx3_dropbear/build.sh
+	tools/rx3_dropbear/test.sh
 
 autoexec:
 	@test -n "$(KEY)" || { echo 'KEY=/path/outside/the/repository/aes256.key is required' >&2; exit 2; }
