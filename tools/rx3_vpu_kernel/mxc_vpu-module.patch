@@ -1,0 +1,42 @@
+--- mxc_vpu.c.orig
++++ mxc_vpu.c
+@@ -43,7 +43,6 @@
+ #include <linux/page-flags.h>
+ #include <linux/mm_types.h>
+ #include <linux/types.h>
+-#include <linux/memblock.h>
+ #include <linux/memory.h>
+ #include <asm/page.h>
+ #include <asm/sizes.h>
+@@ -91,7 +90,9 @@
+ static void __iomem *vpu_base;
+ static int vpu_ipi_irq;
+ static u32 phy_vpu_base_addr;
+-static phys_addr_t top_address_DRAM;
++static unsigned long top_address_DRAM;
++module_param_named(dram_top, top_address_DRAM, ulong, 0444);
++MODULE_PARM_DESC(dram_top, "highest valid RX3 physical RAM address");
+ static struct mxc_vpu_platform_data *vpu_plat;
+ 
+ /* IRAM setting */
+@@ -1045,13 +1046,16 @@
+ 
+ static int __init vpu_init(void)
+ {
+-	int ret = platform_driver_register(&mxcvpu_driver);
++	int ret;
+ 
+-	init_waitqueue_head(&vpu_queue);
++	if (!top_address_DRAM) {
++		printk(KERN_ERR "vpu: dram_top module parameter is required\n");
++		return -EINVAL;
++	}
+ 
++	ret = platform_driver_register(&mxcvpu_driver);
+ 
+-	memblock_analyze();
+-	top_address_DRAM = memblock_end_of_DRAM_with_reserved();
++	init_waitqueue_head(&vpu_queue);
+ 
+ 	return ret;
+ }
