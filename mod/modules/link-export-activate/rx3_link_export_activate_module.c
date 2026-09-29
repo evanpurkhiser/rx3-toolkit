@@ -4,6 +4,9 @@
 
 #define GET_PC_CONTROLLER 0x0031df64u
 #define HANDLE_USB_MOUNT_MESSAGE 0x002e9700u
+#define GET_PC_CONTROL_CERT_INSTANCE 0x00367ca0u
+#define CHECK_CERT_STATUS 0x00367e1cu
+#define PC_CONTROL_CERT_SINGLETON 0x026870c4u
 #define NETWORK_MANAGER_SINGLETON 0x026873d8u
 #define SYSTEM_MANAGER_CHANGE_STATE 0x00393438u
 #define PC_CONTROLLER_VTABLE 0x004d0198u
@@ -19,6 +22,8 @@
 typedef void *(*get_pc_controller_fn)(void);
 typedef void (*handle_usb_mount_fn)(void *, int, const void *, int,
                                     int, int, int, int);
+typedef void *(*get_pc_control_cert_fn)(void);
+typedef uint8_t (*check_cert_status_fn)(void *);
 typedef void (*change_state_fn)(void *, int);
 
 static const struct rx3_services *framework;
@@ -53,13 +58,35 @@ static int firmware_guards_match(void)
     static const uint8_t change_state[8] = {
         0xf0, 0x40, 0x2d, 0xe9, 0x00, 0x40, 0xa0, 0xe1,
     };
+    static const uint8_t get_cert[8] = {
+        0x54, 0x00, 0x9f, 0xe5, 0x08, 0x40, 0x2d, 0xe9,
+    };
+    static const uint8_t check_cert[8] = {
+        0x00, 0x30, 0x90, 0xe5, 0x10, 0x40, 0x2d, 0xe9,
+    };
 
     return !memcmp((const void *)(unsigned long)GET_PC_CONTROLLER,
                    get_pc_controller, sizeof(get_pc_controller)) &&
            !memcmp((const void *)(unsigned long)HANDLE_USB_MOUNT_MESSAGE,
                    handle_mount, sizeof(handle_mount)) &&
+           !memcmp((const void *)(unsigned long)GET_PC_CONTROL_CERT_INSTANCE,
+                   get_cert, sizeof(get_cert)) &&
+           !memcmp((const void *)(unsigned long)CHECK_CERT_STATUS,
+                   check_cert, sizeof(check_cert)) &&
            !memcmp((const void *)(unsigned long)SYSTEM_MANAGER_CHANGE_STATE,
                    change_state, sizeof(change_state));
+}
+
+static int certify_pc_control(void)
+{
+    void *cert = ((get_pc_control_cert_fn)(unsigned long)
+                  GET_PC_CONTROL_CERT_INSTANCE)();
+    if ((unsigned long)cert != PC_CONTROL_CERT_SINGLETON)
+        return 0;
+
+    (void)((check_cert_status_fn)(unsigned long)CHECK_CERT_STATUS)(cert);
+    __sync_synchronize();
+    return *((volatile uint8_t *)cert + 0x0cu) == 1u;
 }
 
 static void *find_pc_controller(void)
@@ -119,6 +146,7 @@ struct link_export_operations {
     int (*guards_match)(void);
     void *(*find_controller)(void);
     void (*mount)(void *);
+    int (*certify)(void);
     int (*change_state)(int);
     int (*pause)(unsigned int);
 };
@@ -131,7 +159,7 @@ static void mount_pc_controller(void *controller)
 
 static struct link_export_operations operations = {
     firmware_guards_match, find_pc_controller, mount_pc_controller,
-    change_link_stop_state, pause_seconds,
+    certify_pc_control, change_link_stop_state, pause_seconds,
 };
 
 static void *activate_link_export(void *unused)
@@ -158,6 +186,10 @@ static void *activate_link_export(void *unused)
         return 0;
     }
     framework->log_line("link export activate: stock USB-mounted callback invoked");
+    if (operations.certify())
+        framework->log_line("link export activate: stock PC certification asserted");
+    else
+        framework->log_line("link export activate: stock PC certification failed");
 
     if (!operations.pause(3u))
         return 0;

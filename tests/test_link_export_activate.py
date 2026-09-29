@@ -37,15 +37,17 @@ static void log_message(const char *line) {(void)line;}
 static int guards(void) {events[event_count++]=20;return 1;}
 static void *find(void) {events[event_count++]=30;return controller;}
 static void mount(void *pc) {events[event_count++]=40;((unsigned char *)pc)[0x72]=1;}
+static int certify(void) {events[event_count++]=50;return 1;}
 static int change(int state) {events[event_count++]=(unsigned int)state;return 1;}
 static int pause_now(unsigned int seconds) {events[event_count++]=seconds;return 1;}
 int main(void) {
     static const struct rx3_services services={.log_line=log_message};
     framework=&services;worker_running=1;
     operations.guards_match=guards;operations.find_controller=find;
-    operations.mount=mount;operations.change_state=change;operations.pause=pause_now;
+    operations.mount=mount;operations.certify=certify;
+    operations.change_state=change;operations.pause=pause_now;
     activate_link_export(0);
-    const unsigned int expected[]={15,20,30,40,3,1,5,5};
+    const unsigned int expected[]={15,20,30,40,50,3,1,5,5};
     assert(event_count==sizeof(expected)/sizeof(expected[0]));
     for(unsigned int i=0;i<event_count;i++)assert(events[i]==expected[i]);
     return 0;
