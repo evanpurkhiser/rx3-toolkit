@@ -1,22 +1,30 @@
-# Integration branches
+# Branch assembly
 
-Integration branches are disposable test branches assembled from the fork's
-core and module branches. The configuration in this directory records the
-merge order, the historical base used to isolate each module's commits, and
-the combined CI workflow used only on the assembled branch.
+The fork keeps three independent core PR branches and module-only source refs.
+The graph in `assembly` produces three layers:
 
-The `Assemble integration branch` workflow rebuilds
-`evanpurkhiser/integration` when it is started from the Actions page. Run it
-after the configured source branches have passed their own CI.
+1. `evanpurkhiser/core` merges the three core PR branches onto upstream main.
+2. Each public feature branch is staged from that shared core and merges one
+   `_assembly/source/*` ref.
+3. `evanpurkhiser/integration` merges all public feature branches.
 
-To preview the same assembly locally without publishing it:
+The source refs prevent a core rebuild from losing module history. Development
+for a module belongs on its source ref; rerunning the assembler recreates its
+public feature branch with the current shared core beneath it.
+
+Git Assembler 1.5 performs the graph rebuild. The exact upstream program and
+its GPLv3 license are vendored under `vendor/git-assembler`.
+
+Run a local rebuild with:
 
 ```sh
-scripts/assemble-integration.sh --remote fork
+scripts/assemble-branches.sh
 ```
 
-Pass `--validate` to run the source checks. Pass `--push` only when the remote
-integration branch should be replaced; publication uses an exact force lease.
+Pass `--validate` to run source checks. `--push` replaces all assembled branch
+refs with exact force leases. The GitHub workflow is manual so branch assembly
+only runs when explicitly requested.
 
-When a module branch is rebased onto a different core stack, update its `pick`
-base in `integration.conf`. Any merge or source conflict stops the assembly.
+The module-specific CI edits overlap in the source branches. Assembly uses the
+union merge driver to pass that mechanical overlap, then replaces the result on
+the integration branch with the reviewed combined workflow in `ci.yml`.

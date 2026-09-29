@@ -26,3 +26,10 @@ The separation models are third-party research artifacts published through the U
 ## Material not relicensed
 
 This project does not grant rights to RX3 firmware, manufacturer executables, product names, trademarks, encryption keys, whether provided by the user or fetched on their request from the manufacturer's published sources, music, Rekordbox exports, or generated stem audio. None of that material is covered by the project's MPL-2.0 license.
+
+## Fork integration tooling
+
+The fork vendors Git Assembler 1.5 at commit
+`acbef9f1fd00b7bbf2cbcf581738a0923acda64f`. Git Assembler is distributed
+under the GNU General Public License version 3 or later. Its source and license
+are kept under `.github/integration/vendor/git-assembler/`.

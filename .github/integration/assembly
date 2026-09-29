@@ -1,0 +1,38 @@
+# Assemble the shared core from the three independent upstream PR branches.
+stage evanpurkhiser/core assembly-upstream/main
+merge evanpurkhiser/core assembly-fork/core/stabilize-runtime-preload-ordering
+merge evanpurkhiser/core assembly-fork/core/enforce-shared-hook-installation
+merge evanpurkhiser/core assembly-fork/core/reproducible-kernel-module-builds
+
+# Every published module branch has the same assembled core as its base. The
+# private source refs retain only the commits owned by that module.
+stage feature/usb-wifi evanpurkhiser/core
+merge feature/usb-wifi assembly-fork/_assembly/source/usb-wifi
+
+stage feature/rx3-ssh evanpurkhiser/core
+merge feature/rx3-ssh assembly-fork/_assembly/source/rx3-ssh
+
+stage feature/pcm-tcp-stream evanpurkhiser/core
+merge feature/pcm-tcp-stream assembly-fork/_assembly/source/pcm-tcp-stream
+
+stage feature/framebuffer-video-stream evanpurkhiser/core
+merge feature/framebuffer-video-stream assembly-fork/_assembly/source/framebuffer-video-stream
+
+stage feature/remote-control evanpurkhiser/core
+merge feature/remote-control assembly-fork/_assembly/source/remote-control
+
+stage ref/link-export-activate evanpurkhiser/core
+merge ref/link-export-activate assembly-fork/_assembly/source/link-export-activate
+
+stage feature/crossfader-curve evanpurkhiser/core
+merge feature/crossfader-curve assembly-fork/_assembly/source/crossfader-curve
+
+# The integration branch combines the same feature tips exposed for review.
+stage evanpurkhiser/integration evanpurkhiser/core
+merge evanpurkhiser/integration feature/usb-wifi
+merge evanpurkhiser/integration feature/rx3-ssh
+merge evanpurkhiser/integration feature/pcm-tcp-stream
+merge evanpurkhiser/integration feature/framebuffer-video-stream
+merge evanpurkhiser/integration feature/remote-control
+merge evanpurkhiser/integration ref/link-export-activate
+merge evanpurkhiser/integration feature/crossfader-curve
