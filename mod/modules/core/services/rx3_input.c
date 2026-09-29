@@ -53,6 +53,8 @@ struct shared_hook {
 
 static struct pad_client pad_clients[CLIENT_LIMIT];
 static struct key_client key_clients[CLIENT_LIMIT];
+static const void *key_observer_owner;
+static rx3_key_observer key_observer;
 static unsigned int pad_client_count, key_client_count;
 static const void *slip_led_owner, *pad_led_owner, *mode_key_owners[CLIENT_LIMIT];
 static rx3_light_fn slip_light, pad_light;
@@ -137,6 +139,8 @@ static int key_hooked(void *target, unsigned int key, unsigned int operation,
                       unsigned int channel, unsigned int a, unsigned int b, unsigned int c)
 {
     enter(&key_hook);
+    rx3_key_observer observer = __atomic_load_n(&key_observer, __ATOMIC_SEQ_CST);
+    if (observer) observer(target, key, operation, channel, a, b, c);
     trace_key(key, operation, channel);
     unsigned int slot = channel < KEY_CHANNELS ? channel : 0u;
     if (key == RX3_KEY_SHIFT) {
@@ -342,9 +346,23 @@ static int claim_mode_keys(const void *owner)
     return 1;
 }
 
+static int observe_keys(const void *owner, rx3_key_observer observer)
+{
+    if (!owner || !observer || key_observer_owner) return 0;
+    if (!acquire(&key_hook, SEND_KEY, send_key_guard, (void *)key_hooked, 0)) return 0;
+
+    key_observer_owner = owner;
+    __atomic_store_n(&key_observer, observer, __ATOMIC_SEQ_CST);
+    return 1;
+}
+
 static void unregister_owner(const void *owner)
 {
     if (!owner) return;
+    if (key_observer_owner == owner) {
+        __atomic_store_n(&key_observer, 0, __ATOMIC_SEQ_CST);
+        key_observer_owner = 0;
+    }
     unsigned int pads = 0, keys = 0, modes = 0;
     for (unsigned int i = 0; i < pad_client_count; i++) {
         if (pad_clients[i].owner == owner) __atomic_store_n(&pad_clients[i].handler, 0, __ATOMIC_SEQ_CST);
@@ -371,7 +389,7 @@ static void unregister_owner(const void *owner)
     drain(&pad_hook); drain(&key_hook); drain(&slip_led_hook);
     drain(&pad_led_hook); drain(&mode_key_hook);
     if (!pads) { relinquish(&pad_hook); if (!pad_hook.original) pad_client_count = 0; }
-    if (!keys) { relinquish(&key_hook); if (!key_hook.original) key_client_count = 0; }
+    if (!keys && !key_observer_owner) { relinquish(&key_hook); if (!key_hook.original) key_client_count = 0; }
     if (!slip_led_owner) relinquish(&slip_led_hook);
     if (!pad_led_owner) relinquish(&pad_led_hook);
     if (!modes) relinquish(&mode_key_hook);
@@ -401,5 +419,5 @@ unsigned int rx3_input_count(void)
 
 const struct rx3_input_service rx3_input = {
     register_pad, register_key, register_lights, claim_mode_keys,
-    unregister_owner, shift_is_held, blink_on, blink_restart
+    unregister_owner, shift_is_held, blink_on, blink_restart, observe_keys, key_hooked
 };

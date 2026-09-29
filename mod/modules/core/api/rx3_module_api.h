@@ -14,7 +14,7 @@
 #include "rx3_audio_api.h"
 #include "rx3_memory_api.h"
 #include "rx3_loader_api.h"
-#define RX3_MODULE_API_VERSION 19u
+#define RX3_MODULE_API_VERSION 20u
 /* Static composition contract, not a promise of a stable dynamic ABI.
  * All descriptors have process lifetime. Startup is serial and explicit.
  * A failed start is followed by stop, including partial installation.

@@ -32,6 +32,38 @@ static void *hooked(unsigned long address) {
 class ServiceTests(unittest.TestCase):
     run_units = test_framework.FrameworkTests.run_units
 
+    def test_key_observer_shares_hook_and_sees_consumed_and_injected_events(self):
+        self.run_units(HOOKS + r'''
+#include "core/api/rx3_input_api.h"
+static unsigned seen, player_calls;
+static const char observer_owner, handler_owner;
+static int player(void *t, unsigned k, unsigned o, unsigned c, unsigned a, unsigned b, unsigned d) {
+    (void)t; (void)k; (void)o; (void)c; (void)a; (void)b; (void)d;
+    player_calls++; return 9;
+}
+static void *original_for(unsigned long a) { (void)a; return (void *)player; }
+static int consume(const struct rx3_key_event *e) { return e->key == 42; }
+static void observe(void *t, unsigned k, unsigned o, unsigned c, unsigned a, unsigned b, unsigned d) {
+    assert(t == (void *)123 && k == 42 && o == 2 && c == 1);
+    assert(a == 7 && b == 0x3f800000u && d == 9); seen++;
+}
+int main(void) {
+    assert(rx3_input.register_key(&handler_owner, 10, consume));
+    assert(rx3_input.observe_keys(&observer_owner, observe));
+    assert(!rx3_input.observe_keys(&handler_owner, observe));
+    assert(installed == 1 && hooked(0x0037ad64u));
+    assert(rx3_input.dispatch_key((void *)123,42,2,1,7,0x3f800000u,9) == 0);
+    assert(seen == 1 && player_calls == 0);
+    rx3_input.unregister_owner(&handler_owner);
+    assert(!detached);
+    assert(rx3_input.dispatch_key((void *)123,42,2,1,7,0x3f800000u,9) == 9);
+    assert(seen == 2 && player_calls == 1);
+    rx3_input.unregister_owner(&observer_owner);
+    assert(detached == 1 && released == 1);
+    return 0;
+}
+''', ['core/services/rx3_input.c'])
+
     def test_pad_chain_priority_consumption_and_last_client_removal(self):
         self.run_units(HOOKS + r'''
 #include "core/api/rx3_input_api.h"
