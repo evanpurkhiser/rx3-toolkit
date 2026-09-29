@@ -142,11 +142,20 @@ assembly_environment=(
 
 git -C "$repo" switch "$integration"
 cp "$repo/.github/integration/ci.yml" "$repo/.github/workflows/ci.yml"
+cp -a "$repo/.github/integration/overlay/." "$repo/"
 
-if ! git -C "$repo" diff --quiet -- .github/workflows/ci.yml; then
-    git -C "$repo" add .github/workflows/ci.yml
+readonly integration_overlays=(
+    .github/workflows/ci.yml
+    docs/README.md
+    mod/modules/core/manifest.json
+    mod/modules/core/runtime/rx3_composition.c
+    tests/test_hook_symbols.py
+)
+
+if ! git -C "$repo" diff --quiet -- "${integration_overlays[@]}"; then
+    git -C "$repo" add "${integration_overlays[@]}"
     "${assembly_environment[@]}" git -C "$repo" commit \
-        -m "Configure integration CI"
+        -m "Configure integration composition"
 fi
 
 if "$validate"; then
