@@ -31,6 +31,11 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Set up Node for UI regression tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -56,8 +61,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld file
 
-      - name: Compile firmware 1.19 hook
-        run: make hook FIRMWARE=1.19
+      - name: Compile the ARM hook
+        run: make hook
 
       - name: Upload ARM runtime hook
         uses: actions/upload-artifact@v4
@@ -75,14 +80,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y 7zip
-
-      - name: Fetch the published RX3 kernel source
-        run: make kernel-source FIRMWARE=1.19
-
       - name: Build the pinned toolchain images
         run: |
           make kernel-builder
@@ -91,11 +88,14 @@ jobs:
             --tag rx3-usb-wifi-builder:bookworm \
             tools/rx3_usb_wifi_userspace
 
+      - name: Fetch the published RX3 kernel source
+        run: make kernel-source FIRMWARE=1.19
+
       - name: Build USB Wi-Fi userspace
         run: |
           tools/rx3_usb_wifi_userspace/fetch-sources.sh \
             build/usb-wifi-sources
-          mod/modules/usb-wifi/1.19/profiles/edimax-ew-7811un-v1/fetch-sources.sh \
+          mod/modules/usb-wifi/profiles/edimax-ew-7811un-v1/fetch-sources.sh \
             build/usb-wifi-sources
           tools/rx3_usb_wifi_userspace/build.sh \
             edimax-ew-7811un-v1 build/usb-wifi-sources
@@ -153,6 +153,7 @@ jobs:
 
   dropbear:
     name: Build RX3 SSH runtime
+
     runs-on: ubuntu-24.04
 
     steps:
@@ -232,7 +233,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld file
+          # The window uses the system webview. It cannot be bundled, so the
+          # machine that builds and the machine that runs both need it.
+          sudo apt-get install -y clang lld file \
+            gir1.2-webkit2-4.1 python3-gi libcairo2-dev libgirepository1.0-dev
 
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
@@ -265,22 +269,28 @@ jobs:
         run: python -m unittest discover -s tests -p test_mod_generator.py
 
       - name: Test separation engine
-        run: python -m unittest discover -s tests -p test_stem_studio.py
+        run: python -m unittest discover -s tests -p 'test_stems*.py'
 
-      - name: Test desktop application sources
-        run: python apps/rx3-toolbox/main.py --self-test
+      - name: Test the window's sources
+        # This imports the webview backend. A backend that reaches for a display
+        # at import time fails here rather than in front of an operator, and
+        # none of these runners has a display server.
+        run: python app/ui/shell.py --self-test
 
       - name: Build desktop application
         env:
           RX3_PREBUILT_HOOK: ${{ github.workspace }}/prebuilt/librx3_core.so
-        run: pyinstaller --noconfirm --clean apps/rx3-toolbox/rx3_toolbox.spec
+        run: pyinstaller --noconfirm --clean packaging/toolkit.spec
 
       - name: Check packaged macOS libraries
         if: runner.os == 'macOS'
         run: python scripts/check_macos_bundle.py "${{ matrix.target }}"
 
       - name: Smoke-test packaged application
-        run: python scripts/smoke_desktop_app.py "${{ matrix.executable }}"
+        shell: bash
+        timeout-minutes: 2
+        run: |
+          "${{ matrix.executable }}" --self-test
 
       - name: Package release
         run: >-

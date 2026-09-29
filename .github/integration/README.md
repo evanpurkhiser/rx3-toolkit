@@ -1,16 +1,17 @@
 # Branch assembly
 
-The fork keeps three independent core PR branches and module-only source refs.
+The fork keeps three independent core PR branches and module-only histories.
 The graph in `assembly` produces three layers:
 
 1. `evanpurkhiser/core` merges the three core PR branches onto upstream main.
 2. Each public feature branch is staged from that shared core and merges one
-   `_assembly/source/*` ref.
+   module source history.
 3. `evanpurkhiser/integration` merges all public feature branches.
 
-The source refs prevent a core rebuild from losing module history. Development
-for a module belongs on its source ref; rerunning the assembler recreates its
-public feature branch with the current shared core beneath it.
+Each public feature tip is a merge whose first parent is the assembled core and
+whose second parent is its module-only history. The assembler recovers that
+second parent before recreating the feature branch, so the source histories do
+not need their own published branches or redundant CI runs.
 
 Git Assembler 1.5 performs the graph rebuild. The exact upstream program and
 its GPLv3 license are vendored under `vendor/git-assembler`.

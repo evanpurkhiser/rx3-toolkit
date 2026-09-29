@@ -7,25 +7,25 @@ merge evanpurkhiser/core assembly-fork/core/reproducible-kernel-module-builds
 # Every published module branch has the same assembled core as its base. The
 # private source refs retain only the commits owned by that module.
 stage feature/usb-wifi evanpurkhiser/core
-merge feature/usb-wifi assembly-fork/_assembly/source/usb-wifi
+merge feature/usb-wifi assembly-source/usb-wifi
 
 stage feature/rx3-ssh evanpurkhiser/core
-merge feature/rx3-ssh assembly-fork/_assembly/source/rx3-ssh
+merge feature/rx3-ssh assembly-source/rx3-ssh
 
 stage feature/pcm-tcp-stream evanpurkhiser/core
-merge feature/pcm-tcp-stream assembly-fork/_assembly/source/pcm-tcp-stream
+merge feature/pcm-tcp-stream assembly-source/pcm-tcp-stream
 
 stage feature/framebuffer-video-stream evanpurkhiser/core
-merge feature/framebuffer-video-stream assembly-fork/_assembly/source/framebuffer-video-stream
+merge feature/framebuffer-video-stream assembly-source/framebuffer-video-stream
 
 stage feature/remote-control evanpurkhiser/core
-merge feature/remote-control assembly-fork/_assembly/source/remote-control
+merge feature/remote-control assembly-source/remote-control
 
 stage ref/link-export-activate evanpurkhiser/core
-merge ref/link-export-activate assembly-fork/_assembly/source/link-export-activate
+merge ref/link-export-activate assembly-source/link-export-activate
 
 stage feature/crossfader-curve evanpurkhiser/core
-merge feature/crossfader-curve assembly-fork/_assembly/source/crossfader-curve
+merge feature/crossfader-curve assembly-source/crossfader-curve
 
 # The integration branch combines the same feature tips exposed for review.
 stage evanpurkhiser/integration evanpurkhiser/core
