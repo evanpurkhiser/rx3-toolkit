@@ -1,0 +1,6 @@
+compat-average.ko
+cfg80211.ko
+mac80211.ko
+rtlwifi.ko
+rtl8192c-common.ko
+rtl8192cu.ko

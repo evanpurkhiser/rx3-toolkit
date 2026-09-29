@@ -7,11 +7,20 @@ By submitting a contribution you agree to license it under the Mozilla Public Li
 
 ## What must never be submitted
 
-Firmware, manufacturer code, manufacturer binaries or GUI assets, credentials, encryption keys, dumps, mounted images, copyrighted audio, extracted proprietary assets, and generated artifacts.
+Device firmware, manufacturer code, manufacturer binaries or GUI assets,
+credentials, encryption keys, dumps, mounted images, copyrighted audio,
+extracted proprietary assets, and generated artifacts.
+
+Generated third-party runtime dependencies stay out of Git. Release automation
+may fetch and package one only when its licence permits redistribution, its
+input is checksum-pinned, and all required licence material accompanies it.
 
 `.gitignore` prevents the common accidents. It does not remove material already in Git history. Run `make preflight`, review `git status`, and inspect the staged diff before every public push.
 
-Tagged GitHub Releases are the only exception for compiled artifacts: CI attaches the applications and the original ARM component they embed. Firmware, manufacturer code, keys, credentials and generated `autoexec.bin` files are never release assets.
+Tagged GitHub Releases are the only exception for compiled artifacts: CI
+attaches the applications, the original ARM component they embed, and declared
+redistributable runtime dependencies. Device firmware, manufacturer code,
+keys, credentials and generated `autoexec.bin` files are never release assets.
 
 ## Repository layout
 
