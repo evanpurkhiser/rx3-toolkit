@@ -2,5 +2,6 @@
 *.sh text eol=lf
 *.py text eol=lf
 *.c text eol=lf
+mod/modules/usb-wifi/profiles/*/LICENCE.rtlwifi_firmware.txt -whitespace
 *.command text eol=lf
 *.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab
