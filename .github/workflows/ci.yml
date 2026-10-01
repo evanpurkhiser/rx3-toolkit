@@ -74,8 +74,6 @@ jobs:
 
   dropbear:
     name: Build RX3 SSH runtime
-  usb-wifi-artifacts:
-    name: Build USB Wi-Fi runtime artifacts
     runs-on: ubuntu-24.04
 
     steps:
@@ -95,6 +93,17 @@ jobs:
         with:
           name: runtime-assets-dropbear
           path: build/artifacts/1.19/rx3-ssh/dropbearmulti
+          if-no-files-found: error
+
+
+  usb-wifi-artifacts:
+    name: Build USB Wi-Fi runtime artifacts
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Build the pinned toolchain images
         run: |
           make kernel-builder

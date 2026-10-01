@@ -6,3 +6,4 @@
 - [Hardware H.264 streaming](hardware-video-encoding-1.19.md): IPU/VPU bring-up and TCP streaming.
 - [VPU userspace](vpu-userspace-bringup-1.19.md): firmware and library validation.
 - [USB Wi-Fi](../mod/modules/usb-wifi/README.md): adapters, configuration and validation.
+- [Remote control](remote-control.md): event capture and guarded command injection.

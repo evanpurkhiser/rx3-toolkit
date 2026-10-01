@@ -53,6 +53,13 @@ typedef void (*rx3_light_fn)(unsigned int deck, unsigned int control, struct rx3
 #define RX3_LIGHTS_SLIP_LOOP 0u
 #define RX3_LIGHTS_PADS      1u
 
+/* A diagnostic observer sees the complete native SEND_KEY payload, including
+ * events consumed by module handlers. Values are raw ARM register words.
+ * The observer must return promptly; dispatch_key runs the same shared path.
+ * Stop dispatching before unregister_owner drains the observer. */
+typedef void (*rx3_key_observer)(void *, unsigned int, unsigned int, unsigned int,
+                                 unsigned int, unsigned int, unsigned int);
+
 struct rx3_input_service {
     int (*register_pad)(const void *owner, unsigned int priority, rx3_pad_handler);
     int (*register_key)(const void *owner, unsigned int priority, rx3_key_handler);
@@ -69,6 +76,9 @@ struct rx3_input_service {
        lights and on-screen controls share it, so they cannot drift apart. */
     int (*blink_on)(void);
     void (*blink_restart)(void);
+    int (*observe_keys)(const void *owner, rx3_key_observer);
+    int (*dispatch_key)(void *, unsigned int, unsigned int, unsigned int,
+                        unsigned int, unsigned int, unsigned int);
 };
 extern const struct rx3_input_service rx3_input;
 #endif
