@@ -72,11 +72,91 @@ jobs:
           if-no-files-found: error
 
 
+  usb-wifi-artifacts:
+    name: Build USB Wi-Fi runtime artifacts
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build the pinned toolchain images
+        run: |
+          make kernel-builder
+          docker build \
+            --file tools/rx3_usb_wifi_userspace/Containerfile \
+            --tag rx3-usb-wifi-builder:bookworm \
+            tools/rx3_usb_wifi_userspace
+
+      - name: Fetch the published RX3 kernel source
+        run: make kernel-source FIRMWARE=1.19
+
+      - name: Build USB Wi-Fi userspace
+        run: |
+          tools/rx3_usb_wifi_userspace/fetch-sources.sh \
+            build/usb-wifi-sources
+          mod/modules/usb-wifi/profiles/edimax-ew-7811un-v1/fetch-sources.sh \
+            build/usb-wifi-sources
+          tools/rx3_usb_wifi_userspace/build.sh \
+            edimax-ew-7811un-v1 build/usb-wifi-sources
+          tools/rx3_usb_wifi_userspace/build.sh \
+            tp-link-archer-t3u-v1 build/usb-wifi-sources
+
+      - name: Build USB Wi-Fi kernel modules
+        run: |
+          make kernel-modules \
+            MODULE=usb-wifi \
+            PROFILE=edimax-ew-7811un-v1 \
+            FIRMWARE=1.19 \
+            KERNEL_SOURCE=build/kernel-source/1.19
+          make kernel-modules \
+            MODULE=usb-wifi \
+            PROFILE=tp-link-archer-t3u-v1 \
+            FIRMWARE=1.19 \
+            KERNEL_SOURCE=build/kernel-source/1.19
+
+      - name: Verify every declared artifact exists
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("build/artifacts/1.19/usb-wifi/edimax-ew-7811un-v1")
+          required = {
+              "profile.json", "usb.ids", "modules.load", "firmware.list",
+              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-ifrename",
+              "compat-average.ko", "cfg80211.ko", "mac80211.ko", "rtlwifi.ko",
+              "rtl8192c-common.ko", "rtl8192cu.ko", "rtlwifi/rtl8192cufw.bin",
+              "LICENCE.rtlwifi_firmware.txt",
+          }
+          missing = sorted(root / path for path in required if not (root / path).is_file())
+          if missing:
+              raise SystemExit("missing artifacts: " + ", ".join(map(str, missing)))
+
+          root = Path("build/artifacts/1.19/usb-wifi/tp-link-archer-t3u-v1")
+          required = {
+              "profile.json", "usb.ids", "modules.load", "firmware.list",
+              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-ifrename",
+              "compat-average.ko", "cfg80211.ko", "88x2bu.ko",
+          }
+          missing = sorted(root / path for path in required if not (root / path).is_file())
+          if missing:
+              raise SystemExit("missing artifacts: " + ", ".join(map(str, missing)))
+          PY
+
+      - name: Upload USB Wi-Fi runtime artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-assets-usb-wifi
+          path: build/artifacts/1.19/usb-wifi
+          if-no-files-found: error
+
+
   desktop-app:
     name: Desktop app (${{ matrix.platform }})
     needs:
       - source
       - arm-hook
+      - usb-wifi-artifacts
 
     strategy:
       fail-fast: false
@@ -146,6 +226,12 @@ jobs:
         with:
           name: runtime-assets-arm-hook
           path: prebuilt
+
+      - name: Download USB Wi-Fi runtime artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-assets-usb-wifi
+          path: build/artifacts/1.19/usb-wifi
 
       - name: Install release dependencies
         env:
