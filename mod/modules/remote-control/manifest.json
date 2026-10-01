@@ -1,0 +1,35 @@
+{
+  "id": "remote-control",
+  "name": {
+    "en": "Bidirectional remote control",
+    "fr": "Télécommande bidirectionnelle"
+  },
+  "description": {
+    "en": "Observes and injects guarded high-level panel controls over TCP.",
+    "fr": "Observe et injecte des commandes de panneau de haut niveau protégées via TCP."
+  },
+  "firmwares": [
+    "1.19"
+  ],
+  "default": false,
+  "order": 94,
+  "category": "diagnostics",
+  "advanced": true,
+  "runtime_directory": "remote-control",
+  "namespace": "remote_control",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "rx3_remote_module.c",
+    "rx3_remote_protocol.h"
+  ]
+}
