@@ -9,6 +9,15 @@
     }
   },
   {
+    "id": "mixer",
+    "order": 15,
+    "collapsed": false,
+    "name": {
+      "en": "Mixer",
+      "fr": "Table de mixage"
+    }
+  },
+  {
     "id": "harmonic-mixing",
     "order": 20,
     "collapsed": false,
