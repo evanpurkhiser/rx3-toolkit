@@ -3,3 +3,4 @@
 
 - [Engineering reference](../REFERENCES.md): technical contracts, findings and dated investigations.
 - [0.6.0 hardware acceptance booklet](acceptance/0.6.0/ACCEPTANCE.md): campaign plan, detailed cases, session sheet and working files.
+- [USB Wi-Fi](../mod/modules/usb-wifi/README.md): adapters, configuration and validation.
