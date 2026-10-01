@@ -1,0 +1,7 @@
+{
+  "id": "tp-link-archer-t3u-v1",
+  "name": "TP-Link Archer T3U V1",
+  "chipset": "Realtek RTL8812BU",
+  "usb_ids": ["2357:012d"],
+  "supplicant_driver": "nl80211"
+}
