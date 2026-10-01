@@ -1,6 +1,6 @@
 # Assemble the shared core from the three independent upstream PR branches.
 stage evanpurkhiser/core assembly-upstream/main
-merge evanpurkhiser/core assembly-fork/core/stabilize-runtime-preload-ordering
+merge evanpurkhiser/core assembly-fork/core/drop-obsolete-stems-preload
 merge evanpurkhiser/core assembly-fork/core/enforce-shared-hook-installation
 merge evanpurkhiser/core assembly-fork/core/reproducible-kernel-module-builds
 
