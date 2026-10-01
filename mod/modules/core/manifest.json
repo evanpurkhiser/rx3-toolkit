@@ -132,7 +132,8 @@
       "samples/rx3_samples_module.c",
       "core/services/rx3_loader.c",
       "pcm-stream/rx3_pcm_stream_module.c",
-      "remote-control/rx3_remote_module.c"
+      "remote-control/rx3_remote_module.c",
+      "link-export-activate/rx3_link_export_activate_module.c"
     ]
   },
   "advanced": true

@@ -1,0 +1,33 @@
+{
+  "id": "link-export-activate",
+  "name": {
+    "en": "Link Export activation",
+    "fr": "Activation de Link Export"
+  },
+  "description": {
+    "en": "Announces Link Export over the network connection already configured for the player.",
+    "fr": "Annonce Link Export sur la connexion réseau déjà configurée pour le lecteur."
+  },
+  "firmwares": [
+    "1.19"
+  ],
+  "default": false,
+  "order": 102,
+  "category": "streaming",
+  "runtime_directory": "link-export-activate",
+  "namespace": "link_export_activate",
+  "requires": [
+    "core"
+  ],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    }
+  ],
+  "build_files": [
+    "rx3_link_export_activate_module.c"
+  ]
+}
