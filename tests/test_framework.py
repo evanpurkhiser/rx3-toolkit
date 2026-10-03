@@ -49,6 +49,8 @@ extern int gettimeofday(void *, void *);
 extern int usleep(unsigned int);
 extern int setenv(const char *, const char *, int);
 extern int unsetenv(const char *);
+int rx3_menu_install(void);
+void rx3_menu_remove(void);
 ''')
             source = directory / 'test.c'
             # Services link against the hook and log units. A test that links
@@ -64,6 +66,8 @@ __attribute__((weak)) int detach_hook(struct installed_hook *h) { (void)h; retur
 __attribute__((weak)) int release_hook(struct installed_hook *h) { (void)h; return 1; }
 __attribute__((weak)) void log_line(const char *s) { (void)s; }
 __attribute__((weak)) void rx3_log_number(const char *s, unsigned long v) { (void)s; (void)v; }
+__attribute__((weak)) int rx3_menu_install(void) { return 0; }
+__attribute__((weak)) void rx3_menu_remove(void) {}
 ''')
             if 'core/runtime/rx3_modules.c' in units:
                 body += '\n#include \"core/api/rx3_browse_api.h\"\nconst struct rx3_browse_service rx3_browse={0};\n'

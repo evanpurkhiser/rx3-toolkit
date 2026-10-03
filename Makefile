@@ -12,6 +12,7 @@ BUILD_DIR ?= build
 # The version an operator reads in the deck's menu. Each module says which
 # versions it is built for; this picks which of them a drive carries.
 FIRMWARE ?= 1.19
+VERSION ?= $(shell git describe --tags --always --long --dirty 2>/dev/null || printf '0.0.0-unknown')
 MODULES ?=
 # The key stays outside this repository. RX3_KEY saves retyping its path on
 # every build; KEY= on the command line still wins.
@@ -33,6 +34,7 @@ PATCH_ARGS := $(foreach patch,$(MODULES),--patch $(patch))
 CFLAGS := --target=arm-linux-gnueabi -march=armv7-a -marm \
 	-mfloat-abi=softfp -mfpu=neon -fPIC -fno-stack-protector \
 	-fno-builtin-memcmp -fno-builtin-bcmp -fvisibility=hidden \
+	-DRX3_TOOLKIT_VERSION='"$(VERSION)"' \
 	-O2 -Wall -Wextra -Werror
 LDFLAGS := -fuse-ld=lld -shared -nostdlib \
 	-Wl,--hash-style=sysv -Wl,--build-id=none

@@ -27,6 +27,14 @@ rbp already renders notices such as EMERGENCY LOOP through `ui::Caution`. The ad
 
 New modules call `services->notices->post(...)`. The translated startup notice uses the same queue through a local adapter. `RX3_MESSAGES=0` or `/tmp/rx3-messages.off` disables toolkit notifications. This switch does not disable rbp's own warnings.
 
+## Utility menu rows
+
+The core preserves rbp's stock Utility table and adds a blank separator followed by an `RX3-TOOLKIT` heading. Its `VERSION` row displays the build's `git describe` value. Shell modules call `register_menu_item <section> <label> <source> <value> [key]` while they load. The built-in section names are `deck`, `mixer`, `general` and `RX3-TOOLKIT`; another name creates a heading after them.
+
+Sources are `literal`, `file`, or `field`. A file source displays its trimmed contents. A field source reads a named key from a `key=value` status file. A background updater refreshes file-backed values twice a second, so rendering only copies cached state and a producer can publish fresh state without restarting rbp. An absent or empty value displays `Unavailable`.
+
+The table shape, stock addresses and literal-pool guards are verified against firmware 1.19. A firmware whose guards differ keeps its stock Utility table and records the refusal in the core log. Physical RX3 acceptance is still required.
+
 ## Building and extending
 
 Run `make hook test preflight PYTHON=.venv/bin/python`. The symbol test rejects imports outside the known player set; the framework tests compile modules without the performance implementation and rebuild from packaged manifest inputs.

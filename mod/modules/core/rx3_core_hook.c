@@ -79,6 +79,7 @@
 #include "services/rx3_browse.h"
 #include "services/rx3_input.h"
 #include "services/rx3_audio.h"
+#include "services/rx3_menu.h"
 
 #include "diagnostics/rx3_probe_format.h"
 #include "ui/rx3_pad_layout.h"
@@ -1653,18 +1654,23 @@ __attribute__((constructor)) static void initialize(void)
     rx3_input_bind_mode_keys(leave_performance_panel);
     rx3_panels_bind_refresh(refresh_performance_ui);
     rx3_modules_bind_writer(rx3_write_guarded);
+    int menu_active = rx3_menu_install();
 
     /* Each feature is a module of its own and announces itself through the
        environment its module.sh exports. Modules start first: they register
        rows, images and handlers, and the shared services install their own
        native hooks as clients arrive. */
     unsigned int started = rx3_modules_start();
-    if (rx3_modules_failures()) { rx3_modules_stop(); return; }
+    if (rx3_modules_failures()) {
+        rx3_modules_stop();
+        rx3_menu_remove();
+        return;
+    }
     if (!rx3_panel_count() && !rx3_image_contributions() && !rx3_browse_count() &&
         !rx3_titles_enabled()) {
-        if (started) {
+        if (started || menu_active) {
             publish_ready();
-            log_line("RX3 performance hook active");
+            log_line("RX3 core hook active");
         }
         return;
     }
@@ -1767,13 +1773,14 @@ __attribute__((constructor)) static void initialize(void)
     else
         log_line("warning: patch-state watcher could not start");
     publish_ready();
-    log_line("RX3 performance hook active");
+    log_line("RX3 core hook active");
     return;
 
 reject_performance_hooks:
     log_line("runtime failed: selected modules not ready");
     rx3_modules_stop();
     uninstall_performance_hooks();
+    rx3_menu_remove();
 }
 
 __attribute__((destructor)) static void finalize(void)
@@ -1786,4 +1793,5 @@ __attribute__((destructor)) static void finalize(void)
     }
     rx3_modules_stop();
     uninstall_performance_hooks();
+    rx3_menu_remove();
 }
