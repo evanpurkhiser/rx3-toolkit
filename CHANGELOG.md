@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+- Add read-only Utility menu rows for runtime modules. The core adds an `RX3-TOOLKIT` section with its `git describe` version, preserves every stock row, and can display live file-backed or `key=value` status under an existing section or a new heading. Firmware 1.19 static validation is complete; physical RX3 acceptance remains pending.
+
 - The third BROWSE column reads less from the USB drive: only the value it shows (BPM, duration, artist or key), instead of the artist and key for every track. Emulator measurement: about 70% less work per track, identical display. First RX3 test with a 980-track USB drive: scrolling clearly faster.
 
 - Stem preparation installs again on Intel Macs ([#21](https://github.com/Tratosca/rx3-toolkit/issues/21)). PyTorch no longer publishes Intel builds, so the app installs the last versions that have them, with Python 3.10 to 3.12; 3.11 and 3.12 need the Xcode Command Line Tools. Checked under Rosetta with vocals, 3-part and every preset; not yet run on a real Intel Mac.

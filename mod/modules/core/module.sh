@@ -84,6 +84,10 @@ core_prepare()
         return 1
     }
 
+    export RX3_MENU_ITEMS="${MENU_ITEM_SPECS:-}"
+    menu_generation=$(printf '%s' "$RX3_MENU_ITEMS" | cksum | awk '{print $1 ":" $2}')
+    module_export RX3_MENU_GENERATION "$menu_generation" "Utility menu" || :
+
     previous_preload=$RBP_PRELOAD
     core_normalize_preload
     preload_changed=0
@@ -116,7 +120,7 @@ core_after_launch()
         return 0
     fi
     if ready_file_matches_pid "$CORE_READY" "$NEW" &&
-       grep -q 'RX3 performance hook active' "$CORE_LOG" 2>/dev/null; then
+       grep -q 'RX3 core hook active' "$CORE_LOG" 2>/dev/null; then
         say "OK: performance core active"
     else
         say "WARNING: rbp is active but the performance core is inactive"

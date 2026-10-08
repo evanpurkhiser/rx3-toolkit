@@ -28,6 +28,7 @@ RBP_READY_FILES=""
 RBP_PID_READY_FILES=""
 RBP_DIAGNOSTIC_FILES=""
 RUNTIME_PRELOAD_ENTRIES=""
+MENU_ITEM_SPECS=""
 LOADED_MODULES=""
 DISABLED_MODULES=""
 CURRENT_MODULE=""
@@ -51,6 +52,29 @@ def run_shell(body: str) -> subprocess.CompletedProcess[str]:
 
 
 class ModuleApiTests(unittest.TestCase):
+    def test_read_only_menu_items_keep_their_section_and_value_source(self):
+        result = run_shell(
+            r'''
+module_begin feature-a feature_a || exit 10
+register_menu_item general "Build ID" literal "nightly 42" || exit 11
+register_menu_item WiFi Status field /tmp/rx3-usb-wifi.state ipv4_address || exit 12
+expected='general|Build ID|literal|nightly 42|
+WiFi|Status|field|/tmp/rx3-usb-wifi.state|ipv4_address'
+[ "$MENU_ITEM_SPECS" = "$expected" ] || exit 13
+'''
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_menu_item_rejects_an_unknown_value_source(self):
+        result = run_shell(
+            r'''
+module_begin feature-a feature_a || exit 10
+register_menu_item general Status command reboot && exit 11
+[ "$MODULE_LOAD_FAILED" = 1 ] || exit 12
+'''
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_removed_or_switched_off_module_requests_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             switch = Path(directory) / "stems.off"

@@ -41,10 +41,13 @@ class RuntimeTransitionTests(unittest.TestCase):
             # glibc hides usleep and ssize_t under strict C11 unless asked for them.
             source.write_text('#define _DEFAULT_SOURCE\n#define RX3_PLATFORM_H\n#include <stdint.h>\n#include <stddef.h>\n'
                               '#include <string.h>\n#include <assert.h>\n#include <pthread.h>\n'
-                              '#include <sys/types.h>\nextern int usleep(unsigned int);\n' + body)
+                              '#include <sys/types.h>\nextern int usleep(unsigned int);\n'
+                              'static int rx3_menu_install(void) { return 0; }\n'
+                              'static void rx3_menu_remove(void) {}\n' + body)
             binary = source.with_suffix("")
             subprocess.run([compiler, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-                            "-Wno-unused-function", "-Wno-unused-variable", "-pthread",
+                            "-Wno-unused-function", "-Wno-unused-variable",
+                            "-Wno-unused-but-set-variable", "-pthread",
                             "-I", str(MODULES), str(source), "-o", str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 

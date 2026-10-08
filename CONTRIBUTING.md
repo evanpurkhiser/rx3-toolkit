@@ -108,6 +108,17 @@ Call `services->notices->post(...)` through the public API. The framework copies
 
 Handle the returned queue status and check service availability; acceptance does not prove display. The [framework contract](REFERENCES.md#doc-runtime-framework--notification-and-dsp-services-api-version-2) documents limits, priorities, cancellation and an example. `RX3_MESSAGES=0` or `/tmp/rx3-messages.off` disables toolkit messages, not rbp's own warnings.
 
+### Adding read-only Utility state
+
+A shell module can add a row to an existing Utility section or create a heading of its own:
+
+```sh
+register_menu_item general "Build channel" literal stable
+register_menu_item WiFi Status field /tmp/rx3-usb-wifi.state ipv4_address
+```
+
+The section names `deck`, `mixer` and `general` append to the corresponding stock section. `RX3-TOOLKIT` appends below the built-in `VERSION` row. Any other section name creates a heading after those sections. Use `file` for the complete trimmed contents of a file and `field` for one key from a `key=value` file. The core refreshes file-backed values in the background twice a second; the producer owns atomic publication of that file. Labels, section names, paths, literal values and keys must not contain `|` or a newline.
+
 ### Which shape your idea has
 
 The question is what your idea has to do, not what our internals are called.

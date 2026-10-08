@@ -98,7 +98,9 @@
     "api/rx3_memory_api.h",
     "api/rx3_loader_api.h",
     "services/rx3_loader.h",
-    "services/rx3_loader.c"
+    "services/rx3_loader.c",
+    "services/rx3_menu.h",
+    "services/rx3_menu.c"
   ],
   "arm_hook": {
     "source": "rx3_core_hook.c",
@@ -130,7 +132,8 @@
       "theme-white/rx3_theme_module.c",
       "stems/rx3_stems_module.c",
       "samples/rx3_samples_module.c",
-      "core/services/rx3_loader.c"
+      "core/services/rx3_loader.c",
+      "core/services/rx3_menu.c"
     ]
   },
   "advanced": true

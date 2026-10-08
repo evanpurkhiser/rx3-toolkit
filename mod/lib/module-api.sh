@@ -317,6 +317,67 @@ register_runtime_preload()
     esac
 }
 
+# Add a non-editable row to Utility. `section` is deck, mixer or general, or
+# the label for a new heading. The core refreshes file-backed values.
+register_menu_item()
+{
+    [ -n "$CURRENT_MODULE" ] || {
+        say "FAILED: menu item registered outside a module"
+        MODULE_LOAD_FAILED=1
+        return 1
+    }
+    _rx3_menu_section=$1
+    _rx3_menu_label=$2
+    _rx3_menu_kind=$3
+    _rx3_menu_value=$4
+    _rx3_menu_key=${5:-}
+    case "$_rx3_menu_kind" in
+        literal|file)
+            [ -z "$_rx3_menu_key" ] || {
+                say "FAILED: $CURRENT_MODULE registered an unexpected menu field key"
+                MODULE_LOAD_FAILED=1
+                return 1
+            }
+            ;;
+        field)
+            [ -n "$_rx3_menu_key" ] || {
+                say "FAILED: $CURRENT_MODULE registered a menu field without a key"
+                MODULE_LOAD_FAILED=1
+                return 1
+            }
+            ;;
+        *)
+            say "FAILED: $CURRENT_MODULE registered unknown menu source [$_rx3_menu_kind]"
+            MODULE_LOAD_FAILED=1
+            return 1
+            ;;
+    esac
+    for _rx3_menu_part in "$_rx3_menu_section" "$_rx3_menu_label" \
+                          "$_rx3_menu_value" "$_rx3_menu_key"; do
+        case "$_rx3_menu_part" in
+            *'|'*|*'
+'*)
+                say "FAILED: $CURRENT_MODULE registered an invalid menu item"
+                MODULE_LOAD_FAILED=1
+                return 1
+                ;;
+        esac
+    done
+    [ -n "$_rx3_menu_section" ] && [ -n "$_rx3_menu_label" ] && \
+        [ -n "$_rx3_menu_value" ] || {
+        say "FAILED: $CURRENT_MODULE registered an incomplete menu item"
+        MODULE_LOAD_FAILED=1
+        return 1
+    }
+    _rx3_menu_spec="$_rx3_menu_section|$_rx3_menu_label|$_rx3_menu_kind|$_rx3_menu_value|$_rx3_menu_key"
+    if [ -n "$MENU_ITEM_SPECS" ]; then
+        MENU_ITEM_SPECS="$MENU_ITEM_SPECS
+$_rx3_menu_spec"
+    else
+        MENU_ITEM_SPECS=$_rx3_menu_spec
+    fi
+}
+
 # Keep a preload at its first position, collapse its duplicates, or append it.
 # Separately packaged modules must not reorder each other's interposers.
 ensure_preload_entry()
