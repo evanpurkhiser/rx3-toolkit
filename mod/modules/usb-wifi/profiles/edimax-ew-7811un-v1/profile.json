@@ -1,0 +1,7 @@
+{
+  "id": "edimax-ew-7811un-v1",
+  "name": "Edimax EW-7811Un V1",
+  "chipset": "Realtek RTL8188CU",
+  "usb_ids": ["7392:7811"],
+  "supplicant_driver": "nl80211"
+}

@@ -1,0 +1,66 @@
+{
+  "id": "usb-wifi",
+  "name": {
+    "en": "USB Wi-Fi",
+    "fr": "Wi-Fi USB"
+  },
+  "description": {
+    "en": "Connects a supported USB Wi-Fi adapter as the player's Link network interface.",
+    "fr": "Utilise un adaptateur Wi-Fi USB compatible comme interface réseau Link du lecteur."
+  },
+  "firmwares": [
+    "1.19"
+  ],
+  "default": false,
+  "order": 92,
+  "category": "diagnostics",
+  "advanced": true,
+  "runtime_directory": "usb-wifi",
+  "namespace": "usb_wifi",
+  "profile_required": true,
+  "requires": [],
+  "conflicts": [],
+  "files": [
+    {
+      "source": "module.sh",
+      "target": "module.sh",
+      "executable": false
+    },
+    {
+      "source": "wpa-action.sh",
+      "target": "wpa-action.sh",
+      "executable": true
+    },
+    {
+      "source": ".",
+      "target": "hardware",
+      "artifact": true,
+      "directory": true
+    },
+    {
+      "source": "licenses/COPYING.linux",
+      "target": "licenses/COPYING.linux",
+      "executable": false
+    },
+    {
+      "source": "licenses/COPYING.libnl",
+      "target": "licenses/COPYING.libnl",
+      "executable": false
+    },
+    {
+      "source": "licenses/COPYING.wpa_supplicant",
+      "target": "licenses/COPYING.wpa_supplicant",
+      "executable": false
+    },
+    {
+      "source": "licenses/COPYRIGHT.musl",
+      "target": "licenses/COPYRIGHT.musl",
+      "executable": false
+    },
+    {
+      "source": "wpa_supplicant.conf.example",
+      "target": "wpa_supplicant.conf.example",
+      "executable": false
+    }
+  ]
+}
