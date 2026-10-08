@@ -206,8 +206,61 @@ class UsbWifiTests(unittest.TestCase):
     def test_state_records_network_outcome(self) -> None:
         self.assertIn('echo "application_interface=$USB_WIFI_APPLICATION_INTERFACE"', MODULE)
         self.assertIn('echo "rear_interface=$USB_WIFI_REAR_INTERFACE"', MODULE)
+        self.assertIn('echo "wifi_connected=$wifi_connected"', MODULE)
+        self.assertIn('echo "wifi_address=$USB_WIFI_ADDRESS"', MODULE)
         self.assertIn('echo "dhcp=$USB_WIFI_DHCP_STATE"', MODULE)
         self.assertIn('echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"', MODULE)
+
+    def test_utility_menu_reports_association_and_address(self) -> None:
+        self.assertIn(
+            'register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field', MODULE
+        )
+        self.assertIn(
+            '"$USB_WIFI_STATE" wifi_connected', MODULE
+        )
+        self.assertIn(
+            'register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field', MODULE
+        )
+        self.assertIn('"$USB_WIFI_STATE" wifi_address', MODULE)
+        self.assertIn('[ "$(usb_wifi_wpa_state)" = "COMPLETED" ]', MODULE)
+        self.assertIn('mv -f "$USB_WIFI_STATE.tmp" "$USB_WIFI_STATE"', MODULE)
+
+    def test_menu_state_follows_the_current_association(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = root / "state"
+            interface = root / "net/eth0"
+            interface.mkdir(parents=True)
+            (interface / "carrier").write_text("1\n")
+            harness = root / "harness.sh"
+            harness.write_text(
+                "set -eu\n"
+                "USB=/media/usb\n"
+                "module_begin() { :; }\n"
+                "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
+                "register_prepare_hook() { :; }\n"
+                "register_after_launch_hook() { :; }\n"
+                "register_stopped_hook() { :; }\n"
+                "register_rollback_hook() { :; }\n"
+                "register_report_hook() { :; }\n"
+                f"USB_WIFI_STATE='{state}'\n"
+                f"USB_WIFI_NET_SYSFS='{root / 'net'}'\n"
+                f". '{HERE / 'module.sh'}'\n"
+                "USB_WIFI_INTERFACE=eth0\n"
+                "USB_WIFI_ADDRESS=10.0.0.144\n"
+                "usb_wifi_wpa_state() { echo COMPLETED; }\n"
+                "ifconfig() { :; }\n"
+                "usb_wifi_write_state\n"
+                f"grep -qx 'wifi_connected=YES' '{state}'\n"
+                f"grep -qx 'wifi_address=10.0.0.144' '{state}'\n"
+                "USB_WIFI_ADDRESS=\n"
+                "usb_wifi_wpa_state() { echo DISCONNECTED; }\n"
+                "usb_wifi_write_state\n"
+                f"grep -qx 'wifi_connected=NO' '{state}'\n"
+                f"grep -qx 'wifi_address=' '{state}'\n"
+            )
+            subprocess.run(["sh", str(harness)], check=True)
 
     def test_diagnostic_log_uses_runtime_contract_path(self) -> None:
         self.assertIn(': "${USB_WIFI_LOG:=/tmp/rx3-usb-wifi.log}"', MODULE)
@@ -232,6 +285,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -265,6 +319,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -307,6 +362,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -347,6 +403,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -404,6 +461,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -452,6 +510,7 @@ class UsbWifiTests(unittest.TestCase):
                 "module_begin() { :; }\n"
                 "register_runtime_preload() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -501,6 +560,7 @@ class UsbWifiTests(unittest.TestCase):
                 "module_begin() { :; }\n"
                 "register_runtime_preload() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -562,6 +622,7 @@ class UsbWifiTests(unittest.TestCase):
                 "register_patch() { :; }\n"
                 "register_runtime_preload() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -601,6 +662,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB=/media/usb\n"
                 "module_begin() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"
@@ -638,6 +700,7 @@ class UsbWifiTests(unittest.TestCase):
                 "register_patch() { :; }\n"
                 "register_runtime_preload() { :; }\n"
                 "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
                 "register_prepare_hook() { :; }\n"
                 "register_after_launch_hook() { :; }\n"
                 "register_stopped_hook() { :; }\n"

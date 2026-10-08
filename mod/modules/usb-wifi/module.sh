@@ -44,6 +44,10 @@ USB_WIFI_DHCP_STATE=pending
 USB_WIFI_SWAP_CHANGED=0
 
 register_diagnostic_file "$USB_WIFI_LOG"
+register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field \
+    "$USB_WIFI_STATE" wifi_connected
+register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field \
+    "$USB_WIFI_STATE" wifi_address
 
 usb_wifi_read_attribute()
 {
@@ -523,6 +527,31 @@ usb_wifi_finish_network()
     return 1
 }
 
+usb_wifi_write_state()
+{
+    wifi_connected=NO
+    [ "$(usb_wifi_wpa_state)" = "COMPLETED" ] && wifi_connected=YES
+
+    {
+        echo "hardware_profile=$USB_WIFI_PROFILE_ID"
+        echo "usb_id=$USB_WIFI_MATCHED_ID"
+        echo "supplicant_driver=$USB_WIFI_SUPPLICANT_DRIVER"
+        echo "interface=$USB_WIFI_INTERFACE"
+        echo "application_interface=$USB_WIFI_APPLICATION_INTERFACE"
+        echo "rear_interface=$USB_WIFI_REAR_INTERFACE"
+        echo "rear_ipv4=$USB_WIFI_REAR_ADDRESS"
+        echo "usb_topology=$USB_WIFI_TOPOLOGY"
+        echo "carrier=$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)"
+        echo "wifi_connected=$wifi_connected"
+        echo "wifi_address=$USB_WIFI_ADDRESS"
+        echo "dhcp=$USB_WIFI_DHCP_STATE"
+        echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"
+        ifconfig "$USB_WIFI_INTERFACE" 2>/dev/null
+    } > "$USB_WIFI_STATE.tmp" || return 1
+
+    mv -f "$USB_WIFI_STATE.tmp" "$USB_WIFI_STATE"
+}
+
 usb_wifi_prepare()
 {
     usb_wifi_load_profile || return 1
@@ -543,20 +572,7 @@ usb_wifi_after_launch()
 {
     usb_wifi_finish_network
     network_status=$?
-    {
-        echo "hardware_profile=$USB_WIFI_PROFILE_ID"
-        echo "usb_id=$USB_WIFI_MATCHED_ID"
-        echo "supplicant_driver=$USB_WIFI_SUPPLICANT_DRIVER"
-        echo "interface=$USB_WIFI_INTERFACE"
-        echo "application_interface=$USB_WIFI_APPLICATION_INTERFACE"
-        echo "rear_interface=$USB_WIFI_REAR_INTERFACE"
-        echo "rear_ipv4=$USB_WIFI_REAR_ADDRESS"
-        echo "usb_topology=$USB_WIFI_TOPOLOGY"
-        echo "carrier=$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)"
-        echo "dhcp=$USB_WIFI_DHCP_STATE"
-        echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"
-        ifconfig "$USB_WIFI_INTERFACE" 2>/dev/null
-    } > "$USB_WIFI_STATE"
+    usb_wifi_write_state || return 1
     return "$network_status"
 }
 
