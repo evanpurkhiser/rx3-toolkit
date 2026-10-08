@@ -51,12 +51,14 @@ USB_WIFI_TIMEOUT_PID=
 USB_WIFI_EVENT_FD_OPEN=0
 
 register_diagnostic_file "$USB_WIFI_LOG"
-register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field \
-    "$USB_WIFI_STATE" wifi_connected
+register_menu_item RX3-TOOLKIT "WIFI STATUS" field \
+    "$USB_WIFI_STATE" wifi_status
 register_menu_item RX3-TOOLKIT "WIFI SSID" field \
     "$USB_WIFI_STATE" wifi_ssid
 register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field \
     "$USB_WIFI_STATE" wifi_address
+register_menu_item RX3-TOOLKIT "WIFI SIGNAL" field \
+    "$USB_WIFI_STATE" wifi_signal
 
 usb_wifi_read_attribute()
 {
@@ -378,6 +380,28 @@ usb_wifi_wpa_state()
     usb_wifi_wpa_value wpa_state
 }
 
+usb_wifi_status()
+{
+    case "$(usb_wifi_wpa_state)" in
+        COMPLETED) printf '%s' CONNECTED ;;
+        SCANNING|AUTHENTICATING|ASSOCIATING|ASSOCIATED|4WAY_HANDSHAKE|GROUP_HANDSHAKE)
+            printf '%s' ASSOCIATING
+            ;;
+        *) printf '%s' DISCONNECTED ;;
+    esac
+}
+
+usb_wifi_signal()
+{
+    signal=$(
+        "$USB_WIFI_CLI" -p "$USB_WIFI_RUNTIME_DIRECTORY/control" \
+            -i "$USB_WIFI_INTERFACE" signal_poll 2>/dev/null | awk -F= \
+            '$1 == "RSSI" { print $2; exit }'
+    )
+    [ -n "$signal" ] || return 0
+    printf '%s dBm' "$signal"
+}
+
 usb_wifi_existing_association()
 {
     [ "$USB_WIFI_SOURCE_INTERFACE" = "$USB_WIFI_APPLICATION_INTERFACE" ] || return 1
@@ -571,9 +595,9 @@ usb_wifi_finish_network()
 
 usb_wifi_write_state()
 {
-    wifi_connected=NO
-    [ "$(usb_wifi_wpa_state)" = "COMPLETED" ] && wifi_connected=YES
+    wifi_status=$(usb_wifi_status)
     wifi_ssid=$(usb_wifi_wpa_value ssid)
+    wifi_signal=$(usb_wifi_signal)
 
     {
         echo "hardware_profile=$USB_WIFI_PROFILE_ID"
@@ -586,9 +610,10 @@ usb_wifi_write_state()
         echo "usb_topology=$USB_WIFI_TOPOLOGY"
         echo "association=$USB_WIFI_ASSOCIATION_STATE"
         echo "carrier=$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)"
-        echo "wifi_connected=$wifi_connected"
+        echo "wifi_status=$wifi_status"
         echo "wifi_ssid=$wifi_ssid"
         echo "wifi_address=$USB_WIFI_ADDRESS"
+        echo "wifi_signal=$wifi_signal"
         echo "dhcp=$USB_WIFI_DHCP_STATE"
         echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"
         ifconfig "$USB_WIFI_INTERFACE" 2>/dev/null

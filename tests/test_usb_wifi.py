@@ -207,20 +207,19 @@ class UsbWifiTests(unittest.TestCase):
     def test_state_records_network_outcome(self) -> None:
         self.assertIn('echo "application_interface=$USB_WIFI_APPLICATION_INTERFACE"', MODULE)
         self.assertIn('echo "rear_interface=$USB_WIFI_REAR_INTERFACE"', MODULE)
-        self.assertIn('echo "wifi_connected=$wifi_connected"', MODULE)
+        self.assertIn('echo "wifi_status=$wifi_status"', MODULE)
         self.assertIn('echo "wifi_ssid=$wifi_ssid"', MODULE)
         self.assertIn('echo "wifi_address=$USB_WIFI_ADDRESS"', MODULE)
+        self.assertIn('echo "wifi_signal=$wifi_signal"', MODULE)
         self.assertIn('echo "association=$USB_WIFI_ASSOCIATION_STATE"', MODULE)
         self.assertIn('echo "dhcp=$USB_WIFI_DHCP_STATE"', MODULE)
         self.assertIn('echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"', MODULE)
 
     def test_utility_menu_reports_association_and_address(self) -> None:
         self.assertIn(
-            'register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field', MODULE
+            'register_menu_item RX3-TOOLKIT "WIFI STATUS" field', MODULE
         )
-        self.assertIn(
-            '"$USB_WIFI_STATE" wifi_connected', MODULE
-        )
+        self.assertIn('"$USB_WIFI_STATE" wifi_status', MODULE)
         self.assertIn(
             'register_menu_item RX3-TOOLKIT "WIFI SSID" field', MODULE
         )
@@ -229,7 +228,11 @@ class UsbWifiTests(unittest.TestCase):
             'register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field', MODULE
         )
         self.assertIn('"$USB_WIFI_STATE" wifi_address', MODULE)
-        self.assertIn('[ "$(usb_wifi_wpa_state)" = "COMPLETED" ]', MODULE)
+        self.assertIn(
+            'register_menu_item RX3-TOOLKIT "WIFI SIGNAL" field', MODULE
+        )
+        self.assertIn('"$USB_WIFI_STATE" wifi_signal', MODULE)
+        self.assertIn('COMPLETED) printf \'%s\' CONNECTED', MODULE)
         self.assertIn('mv -f "$USB_WIFI_STATE.tmp" "$USB_WIFI_STATE"', MODULE)
 
     def test_menu_state_follows_the_current_association(self) -> None:
@@ -242,7 +245,10 @@ class UsbWifiTests(unittest.TestCase):
             cli = root / "wpa_cli"
             cli.write_text(
                 "#!/bin/sh\n"
-                "printf 'wpa_state=%s\\nssid=%s\\n' \"$TEST_WPA_STATE\" \"$TEST_SSID\"\n"
+                "case \"$*\" in\n"
+                "  *signal_poll*) printf 'RSSI=%s\\n' \"$TEST_RSSI\" ;;\n"
+                "  *) printf 'wpa_state=%s\\nssid=%s\\n' \"$TEST_WPA_STATE\" \"$TEST_SSID\" ;;\n"
+                "esac\n"
             )
             cli.chmod(0o755)
             harness = root / "harness.sh"
@@ -265,19 +271,26 @@ class UsbWifiTests(unittest.TestCase):
                 "USB_WIFI_ADDRESS=10.0.0.144\n"
                 "TEST_WPA_STATE=COMPLETED\n"
                 "TEST_SSID='Studio=5G'\n"
-                "export TEST_WPA_STATE TEST_SSID\n"
+                "TEST_RSSI=-52\n"
+                "export TEST_WPA_STATE TEST_SSID TEST_RSSI\n"
                 "ifconfig() { :; }\n"
                 "usb_wifi_write_state\n"
-                f"grep -qx 'wifi_connected=YES' '{state}'\n"
+                f"grep -qx 'wifi_status=CONNECTED' '{state}'\n"
                 f"grep -qx 'wifi_ssid=Studio=5G' '{state}'\n"
                 f"grep -qx 'wifi_address=10.0.0.144' '{state}'\n"
+                f"grep -qx 'wifi_signal=-52 dBm' '{state}'\n"
                 "USB_WIFI_ADDRESS=\n"
-                "TEST_WPA_STATE=DISCONNECTED\n"
+                "TEST_WPA_STATE=ASSOCIATING\n"
                 "TEST_SSID=\n"
+                "TEST_RSSI=\n"
                 "usb_wifi_write_state\n"
-                f"grep -qx 'wifi_connected=NO' '{state}'\n"
+                f"grep -qx 'wifi_status=ASSOCIATING' '{state}'\n"
                 f"grep -qx 'wifi_ssid=' '{state}'\n"
                 f"grep -qx 'wifi_address=' '{state}'\n"
+                f"grep -qx 'wifi_signal=' '{state}'\n"
+                "TEST_WPA_STATE=DISCONNECTED\n"
+                "usb_wifi_write_state\n"
+                f"grep -qx 'wifi_status=DISCONNECTED' '{state}'\n"
             )
             subprocess.run(["sh", str(harness)], check=True)
 
