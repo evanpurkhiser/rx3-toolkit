@@ -108,8 +108,8 @@ EOF
 
         "$work/musl-prefix/bin/musl-gcc" \
             -Os -march=armv7-a -marm -mfloat-abi=softfp \
-            -static -Wl,--gc-sections -o /out/rx3-ifrename /tool/ifrename.c
-        arm-linux-gnueabi-strip /out/rx3-ifrename
+            -static -Wl,--gc-sections -o /out/rx3-netctl /tool/netctl.c
+        arm-linux-gnueabi-strip /out/rx3-netctl
 
         cp wpa_supplicant /out/
         cp wpa_cli /out/
@@ -117,8 +117,8 @@ EOF
         ! readelf -l /out/wpa_supplicant | grep -q "Requesting program interpreter"
         readelf -h /out/wpa_cli | grep -q "Machine:.*ARM"
         ! readelf -l /out/wpa_cli | grep -q "Requesting program interpreter"
-        readelf -h /out/rx3-ifrename | grep -q "Machine:.*ARM"
-        ! readelf -l /out/rx3-ifrename | grep -q "Requesting program interpreter"
+        readelf -h /out/rx3-netctl | grep -q "Machine:.*ARM"
+        ! readelf -l /out/rx3-netctl | grep -q "Requesting program interpreter"
     '
 
 while read -r source target; do

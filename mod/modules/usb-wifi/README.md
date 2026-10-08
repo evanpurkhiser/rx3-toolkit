@@ -21,7 +21,7 @@ The module packages the complete stack for that device:
 | --- | --- |
 | Kernel | `compat-average`, `cfg80211`, `mac80211`, `rtlwifi`, `rtl8192c-common`, `rtl8192cu` |
 | Firmware | `rtlwifi/rtl8192cufw.bin` and its redistribution license |
-| Userspace | Static ARM `wpa_supplicant`, `wpa_cli`, and `rx3-ifrename` |
+| Userspace | Static ARM `wpa_supplicant`, `wpa_cli`, and `rx3-netctl` |
 
 The packaged license directory contains the Linux GPL-2.0, libnl LGPL-2.1,
 wpa_supplicant BSD, and musl MIT terms. The Realtek firmware license is next to
@@ -83,8 +83,8 @@ On a cold boot or normal toolkit-drive insertion, the module:
    kernel modules in declared dependency order;
 2. finds exactly one interface matching a declared USB ID;
 3. copies the userspace programs and Wi-Fi configuration into `/dev/shm`;
-4. associates while the adapter still has its kernel-assigned name, normally
-   `wlan0`;
+4. associates from supplicant control events while the adapter still has its
+   kernel-assigned name, normally `wlan0`;
    if the RTL8192CU stack remains stuck scanning, resets that USB device once,
    rediscovers its interface name, and retries association;
 5. requests a player-application restart;
@@ -92,9 +92,11 @@ On a cold boot or normal toolkit-drive insertion, the module:
    and the Wi-Fi adapter from `wlan0` to `eth0`;
    assigns `169.254.100.2/16` to `usb0` so management services remain
    reachable whenever the rear cable has carrier;
-7. restarts association on `eth0`, then launches the unmodified player
+7. starts association on `eth0` and immediately launches the unmodified player
    application;
-8. lets the application run its stock DHCP client, followed by one bounded
+8. completes the in-progress association after launch, then lets the
+   application run its stock DHCP client and observes address changes through
+   route netlink, followed by one bounded
    `udhcpc -i eth0 -T 2 -t 3 -n -q` recovery attempt when needed.
 
 Reinsertion after a successful swap reuses the associated `eth0` connection.
@@ -141,7 +143,8 @@ remains reachable there.
 With logging enabled, inspect `RX3_RUNTIME/session.txt` on the toolkit drive,
 `/tmp/rx3-usb-wifi.state`, and `/tmp/rx3-usb-wifi.log` on the player. Success
 reports `carrier=1`, a normal non-link-local IPv4 address, and either
-`dhcp=rbp-bound` or `dhcp=recovery-bound`.
+`association=connected` with either `dhcp=rbp-bound` or
+`dhcp=recovery-bound`.
 
 ## Validation and limitations
 

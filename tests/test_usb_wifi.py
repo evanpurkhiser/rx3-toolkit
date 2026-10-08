@@ -98,6 +98,7 @@ class UsbWifiTests(unittest.TestCase):
             "rtlwifi/rtl8192cufw.bin rtlwifi/rtl8192cufw.bin",
         )
         self.assertIn("hardware", targets)
+        self.assertIn("wpa-action.sh", targets)
         self.assertIn("wpa_supplicant.conf.example", targets)
         self.assertEqual(
             {target for target in targets if target.startswith("licenses/")},
@@ -190,10 +191,10 @@ class UsbWifiTests(unittest.TestCase):
         self.assertIn("usb_wifi_configure_rear_interface", MODULE)
         self.assertIn("register_stopped_hook usb_wifi_swap_interfaces", MODULE)
         self.assertIn(
-            '"$USB_WIFI_IFRENAME" "$USB_WIFI_APPLICATION_INTERFACE"', MODULE
+            '"$USB_WIFI_NETCTL" rename "$USB_WIFI_APPLICATION_INTERFACE"', MODULE
         )
         self.assertIn(
-            '"$USB_WIFI_IFRENAME" "$USB_WIFI_SOURCE_INTERFACE"', MODULE
+            '"$USB_WIFI_NETCTL" rename "$USB_WIFI_SOURCE_INTERFACE"', MODULE
         )
         self.assertIn(
             'udhcpc -i "$USB_WIFI_INTERFACE" -T 2 -t 3 -n -q',
@@ -209,6 +210,7 @@ class UsbWifiTests(unittest.TestCase):
         self.assertIn('echo "wifi_connected=$wifi_connected"', MODULE)
         self.assertIn('echo "wifi_ssid=$wifi_ssid"', MODULE)
         self.assertIn('echo "wifi_address=$USB_WIFI_ADDRESS"', MODULE)
+        self.assertIn('echo "association=$USB_WIFI_ASSOCIATION_STATE"', MODULE)
         self.assertIn('echo "dhcp=$USB_WIFI_DHCP_STATE"', MODULE)
         self.assertIn('echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"', MODULE)
 
@@ -360,6 +362,152 @@ class UsbWifiTests(unittest.TestCase):
             )
             self.assertEqual(result.stdout, "wlan0\n2-1.22-1.2")
 
+    def test_association_is_driven_by_the_supplicant_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            action = runtime / "wpa-action.sh"
+            action.write_text((HERE / "wpa-action.sh").read_text())
+            action.chmod(0o755)
+            cli = runtime / "wpa_cli"
+            cli.write_text(
+                "#!/bin/sh\n"
+                'while [ "$#" -gt 0 ]; do\n'
+                '    case "$1" in\n'
+                '        -a) action=$2; shift 2 ;;\n'
+                '        *) shift ;;\n'
+                '    esac\n'
+                'done\n'
+                '"$action" wlan0 CONNECTED\n'
+            )
+            cli.chmod(0o755)
+            harness = root / "harness.sh"
+            harness.write_text(
+                "set -eu\n"
+                "USB=/media/usb\n"
+                "module_begin() { :; }\n"
+                "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
+                "register_prepare_hook() { :; }\n"
+                "register_after_launch_hook() { :; }\n"
+                "register_stopped_hook() { :; }\n"
+                "register_rollback_hook() { :; }\n"
+                "register_report_hook() { :; }\n"
+                "say() { :; }\n"
+                f"USB_WIFI_RUNTIME_DIRECTORY='{runtime}'\n"
+                f"USB_WIFI_LOG='{root / 'wifi.log'}'\n"
+                f". '{HERE / 'module.sh'}'\n"
+                "USB_WIFI_INTERFACE=wlan0\n"
+                "usb_wifi_start_supplicant() { :; }\n"
+                "usb_wifi_begin_association\n"
+                "usb_wifi_finish_association\n"
+            )
+            result = subprocess.run(
+                ["sh", str(harness)], timeout=5, capture_output=True
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_association_timeout_is_only_a_failure_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            cli = runtime / "wpa_cli"
+            cli.write_text("#!/bin/sh\nsleep 5\n")
+            cli.chmod(0o755)
+            harness = root / "harness.sh"
+            harness.write_text(
+                "set -eu\n"
+                "USB=/media/usb\n"
+                "module_begin() { :; }\n"
+                "register_diagnostic_file() { :; }\n"
+                "register_menu_item() { :; }\n"
+                "register_prepare_hook() { :; }\n"
+                "register_after_launch_hook() { :; }\n"
+                "register_stopped_hook() { :; }\n"
+                "register_rollback_hook() { :; }\n"
+                "register_report_hook() { :; }\n"
+                "say() { :; }\n"
+                f"USB_WIFI_RUNTIME_DIRECTORY='{runtime}'\n"
+                f"USB_WIFI_LOG='{root / 'wifi.log'}'\n"
+                "USB_WIFI_ASSOCIATION_TIMEOUT=0\n"
+                f". '{HERE / 'module.sh'}'\n"
+                "USB_WIFI_INTERFACE=wlan0\n"
+                "usb_wifi_start_supplicant() { :; }\n"
+                "usb_wifi_begin_association\n"
+                "! usb_wifi_finish_association\n"
+            )
+            result = subprocess.run(
+                ["sh", str(harness)], timeout=5, capture_output=True
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_association_does_not_poll_carrier(self) -> None:
+        association = MODULE[
+            MODULE.index("usb_wifi_begin_association()") :
+            MODULE.index("usb_wifi_restore_original_links()")
+        ]
+        self.assertNotIn("carrier", association)
+        self.assertNotIn("sleep 1", association)
+        self.assertIn('association_event" = "CONNECTED"', association)
+        self.assertIn('"$USB_WIFI_SUPPLICANT" -W', MODULE)
+
+    def test_reassociation_runs_across_the_replacement_launch(self) -> None:
+        swap = MODULE[
+            MODULE.index("usb_wifi_swap_interfaces()") :
+            MODULE.index("usb_wifi_wait_for_dhcp()")
+        ]
+        after_launch = MODULE[
+            MODULE.index("usb_wifi_after_launch()") :
+            MODULE.index("usb_wifi_report()")
+        ]
+
+        self.assertIn("usb_wifi_begin_association", swap)
+        self.assertNotIn("usb_wifi_finish_association", swap)
+        self.assertLess(
+            after_launch.index("usb_wifi_finish_association"),
+            after_launch.index("usb_wifi_finish_network"),
+        )
+
+    def test_rollback_aborts_pending_association(self) -> None:
+        rollback = MODULE[
+            MODULE.index("usb_wifi_rollback_swap()") :
+            MODULE.index("usb_wifi_configure_rear_interface()")
+        ]
+        self.assertIn("usb_wifi_abort_association", rollback)
+
+    def test_dhcp_wait_uses_route_netlink(self) -> None:
+        wait = MODULE[
+            MODULE.index("usb_wifi_wait_for_dhcp()") :
+            MODULE.index("usb_wifi_dhcp_running()")
+        ]
+        self.assertIn('"$USB_WIFI_NETCTL" ipv4', wait)
+        self.assertNotIn("sleep", wait)
+        self.assertNotIn("while", wait)
+
+    def test_netctl_handles_current_interface_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "rx3-netctl"
+            subprocess.run(
+                [
+                    "cc", "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra",
+                    "-Werror", str(ROOT / "tools/rx3_usb_wifi_userspace/netctl.c"),
+                    "-o", str(executable),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            absent = subprocess.run(
+                [str(executable), "absent", "rx3none", "0"],
+                capture_output=True,
+            )
+            no_lan_address = subprocess.run(
+                [str(executable), "ipv4", "lo", "0"], capture_output=True
+            )
+            self.assertEqual(absent.returncode, 0, absent.stderr)
+            self.assertEqual(no_lan_address.returncode, 1, no_lan_address.stderr)
+
     def test_existing_swapped_connection_is_reused(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -454,7 +602,7 @@ class UsbWifiTests(unittest.TestCase):
         self.assertLess(
             changed,
             MODULE.index(
-                '"$USB_WIFI_IFRENAME" "$USB_WIFI_SOURCE_INTERFACE"', changed
+                '"$USB_WIFI_NETCTL" rename "$USB_WIFI_SOURCE_INTERFACE"', changed
             ),
         )
 
@@ -466,9 +614,12 @@ class UsbWifiTests(unittest.TestCase):
             runtime.mkdir()
             (net / "wlan0").mkdir(parents=True)
             (net / "usb0").mkdir()
-            ifrename = runtime / "rx3-ifrename"
-            ifrename.write_text('#!/bin/sh\nmv "$NET_ROOT/$1" "$NET_ROOT/$2"\n')
-            ifrename.chmod(0o755)
+            netctl = runtime / "rx3-netctl"
+            netctl.write_text(
+                '#!/bin/sh\n[ "$1" = rename ] || exit 1\n'
+                'mv "$NET_ROOT/$2" "$NET_ROOT/$3"\n'
+            )
+            netctl.chmod(0o755)
             ifconfig = root / "ifconfig"
             ifconfig.write_text("#!/bin/sh\nexit 0\n")
             ifconfig.chmod(0o755)
@@ -491,8 +642,7 @@ class UsbWifiTests(unittest.TestCase):
                 "USB_WIFI_SOURCE_INTERFACE=wlan0\n"
                 "USB_WIFI_INTERFACE=wlan0\n"
                 "usb_wifi_stop_owned_supplicant() { :; }\n"
-                "usb_wifi_start_supplicant() { :; }\n"
-                "usb_wifi_wait_for_association() { :; }\n"
+                "usb_wifi_begin_association() { USB_WIFI_ASSOCIATION_STATE=pending; }\n"
                 "usb_wifi_swap_interfaces\n"
                 f"test -d '{net / 'eth0'}'\n"
                 f"test ! -e '{net / 'wlan0'}'\n"
@@ -513,9 +663,12 @@ class UsbWifiTests(unittest.TestCase):
             net = root / "net"
             runtime.mkdir()
             (net / "usb0").mkdir(parents=True)
-            ifrename = runtime / "rx3-ifrename"
-            ifrename.write_text('#!/bin/sh\nmv "$NET_ROOT/$1" "$NET_ROOT/$2"\n')
-            ifrename.chmod(0o755)
+            netctl = runtime / "rx3-netctl"
+            netctl.write_text(
+                '#!/bin/sh\n[ "$1" = rename ] || exit 1\n'
+                'mv "$NET_ROOT/$2" "$NET_ROOT/$3"\n'
+            )
+            netctl.chmod(0o755)
             ifconfig = root / "ifconfig"
             ifconfig.write_text("#!/bin/sh\nexit 0\n")
             ifconfig.chmod(0o755)
@@ -560,12 +713,17 @@ class UsbWifiTests(unittest.TestCase):
             runtime.mkdir()
             (net / "eth0").mkdir(parents=True)
             (net / "usb0").mkdir()
-            ifrename = runtime / "rx3-ifrename"
-            ifrename.write_text(
-                '#!/bin/sh\n[ "$1" != eth0 ] || exit 1\n'
-                'mv "$NET_ROOT/$1" "$NET_ROOT/$2"\n'
+            netctl = runtime / "rx3-netctl"
+            netctl.write_text(
+                '#!/bin/sh\n'
+                'case "$1" in\n'
+                '    rename) [ "$2" != eth0 ] || exit 1; '
+                'mv "$NET_ROOT/$2" "$NET_ROOT/$3" ;;\n'
+                '    absent) [ ! -e "$NET_ROOT/$2" ] ;;\n'
+                '    *) exit 1 ;;\n'
+                'esac\n'
             )
-            ifrename.chmod(0o755)
+            netctl.chmod(0o755)
             ifconfig = root / "ifconfig"
             ifconfig.write_text("#!/bin/sh\nexit 0\n")
             ifconfig.chmod(0o755)
@@ -697,48 +855,10 @@ class UsbWifiTests(unittest.TestCase):
                 b"firmware",
             )
 
-    def test_lan_address_ignores_link_local_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            fixture = root / "ifconfig.txt"
-            fixture.write_text(
-                "usb0      Link encap:Ethernet  HWaddr 74:da:38:2b:2d:45\n"
-                "          inet addr:169.254.41.8  Bcast:169.254.255.255\n"
-                "          inet addr:10.0.0.144  Bcast:10.0.0.255\n"
-            )
-            ifconfig = root / "ifconfig"
-            ifconfig.write_text('#!/bin/sh\ncat "$IFCONFIG_FIXTURE"\n')
-            ifconfig.chmod(0o755)
-
-            harness = root / "harness.sh"
-            harness.write_text(
-                "USB=/media/usb\n"
-                "module_begin() { :; }\n"
-                "register_patch() { :; }\n"
-                "register_runtime_preload() { :; }\n"
-                "register_diagnostic_file() { :; }\n"
-                "register_menu_item() { :; }\n"
-                "register_prepare_hook() { :; }\n"
-                "register_after_launch_hook() { :; }\n"
-                "register_stopped_hook() { :; }\n"
-                "register_rollback_hook() { :; }\n"
-                "register_report_hook() { :; }\n"
-                "say() { :; }\n"
-                f". '{HERE / 'module.sh'}'\n"
-                "usb_wifi_lan_address\n"
-            )
-            environment = os.environ | {
-                "IFCONFIG_FIXTURE": str(fixture),
-                "PATH": f"{root}:{os.environ['PATH']}",
-            }
-            result = subprocess.run(
-                ["sh", str(harness)],
-                check=True,
-                text=True,
-                capture_output=True,
-                env=environment,
-            )
-            self.assertEqual(result.stdout, "10.0.0.144\n")
+    def test_netctl_ignores_loopback_and_link_local_addresses(self) -> None:
+        source = (ROOT / "tools/rx3_usb_wifi_userspace/netctl.c").read_text()
+        self.assertIn("(host_address >> 24) == 127", source)
+        self.assertIn("(host_address >> 16) == 0xa9fe", source)
 
 
 if __name__ == "__main__":

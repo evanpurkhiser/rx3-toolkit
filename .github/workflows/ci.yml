@@ -127,7 +127,7 @@ jobs:
           root = Path("build/artifacts/1.19/usb-wifi/edimax-ew-7811un-v1")
           required = {
               "profile.json", "usb.ids", "modules.load", "firmware.list",
-              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-ifrename",
+              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-netctl",
               "compat-average.ko", "cfg80211.ko", "mac80211.ko", "rtlwifi.ko",
               "rtl8192c-common.ko", "rtl8192cu.ko", "rtlwifi/rtl8192cufw.bin",
               "LICENCE.rtlwifi_firmware.txt",
@@ -139,7 +139,7 @@ jobs:
           root = Path("build/artifacts/1.19/usb-wifi/tp-link-archer-t3u-v1")
           required = {
               "profile.json", "usb.ids", "modules.load", "firmware.list",
-              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-ifrename",
+              "supplicant.driver", "wpa_supplicant", "wpa_cli", "rx3-netctl",
               "compat-average.ko", "cfg80211.ko", "88x2bu.ko",
           }
           missing = sorted(root / path for path in required if not (root / path).is_file())

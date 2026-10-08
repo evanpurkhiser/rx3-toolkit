@@ -2,7 +2,9 @@
 # RX3 USB Wi-Fi userspace
 
 This directory builds the hardware-independent ARM userspace used by every
-`usb-wifi` profile: static `wpa_supplicant`, `wpa_cli`, and `rx3-ifrename`.
+`usb-wifi` profile: static `wpa_supplicant`, `wpa_cli`, and `rx3-netctl`.
+The network helper renames interfaces and blocks on route-netlink notifications
+so the runtime can react to interface and address changes without polling.
 The selected profile supplies device firmware, licenses, USB IDs, kernel
 modules, and the supplicant backend.
 

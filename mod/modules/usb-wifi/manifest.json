@@ -27,6 +27,11 @@
       "executable": false
     },
     {
+      "source": "wpa-action.sh",
+      "target": "wpa-action.sh",
+      "executable": true
+    },
+    {
       "source": ".",
       "target": "hardware",
       "artifact": true,

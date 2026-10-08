@@ -32,16 +32,23 @@ USB_WIFI_PID_FILE=$USB_WIFI_RUNTIME_DIRECTORY/wpa_supplicant.pid
 USB_WIFI_RUNTIME_CONFIG=$USB_WIFI_RUNTIME_DIRECTORY/wpa_supplicant.conf
 USB_WIFI_SUPPLICANT=$USB_WIFI_RUNTIME_DIRECTORY/wpa_supplicant
 USB_WIFI_CLI=$USB_WIFI_RUNTIME_DIRECTORY/wpa_cli
-USB_WIFI_IFRENAME=$USB_WIFI_RUNTIME_DIRECTORY/rx3-ifrename
+USB_WIFI_ACTION=$USB_WIFI_RUNTIME_DIRECTORY/wpa-action.sh
+USB_WIFI_NETCTL=$USB_WIFI_RUNTIME_DIRECTORY/rx3-netctl
+USB_WIFI_EVENT_FIFO=$USB_WIFI_RUNTIME_DIRECTORY/wpa-event
 USB_WIFI_PROFILE_ID=
 USB_WIFI_MATCHED_ID=
 USB_WIFI_SUPPLICANT_DRIVER=
-USB_WIFI_DHCP_ATTEMPTS=25
-USB_WIFI_DHCP_RETRY_ATTEMPTS=10
+USB_WIFI_DHCP_TIMEOUT=25
+USB_WIFI_DHCP_RETRY_TIMEOUT=10
 USB_WIFI_RESET_ATTEMPTS=10
+: "${USB_WIFI_ASSOCIATION_TIMEOUT:=30}"
 USB_WIFI_ADDRESS=
 USB_WIFI_DHCP_STATE=pending
 USB_WIFI_SWAP_CHANGED=0
+USB_WIFI_ASSOCIATION_STATE=idle
+USB_WIFI_EVENT_PID=
+USB_WIFI_TIMEOUT_PID=
+USB_WIFI_EVENT_FD_OPEN=0
 
 register_diagnostic_file "$USB_WIFI_LOG"
 register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field \
@@ -178,9 +185,11 @@ usb_wifi_stage_runtime()
     mkdir -p "$USB_WIFI_RUNTIME_DIRECTORY" || return 1
     cp "$USB_WIFI_HARDWARE_DIRECTORY/wpa_supplicant" "$USB_WIFI_SUPPLICANT" || return 1
     cp "$USB_WIFI_HARDWARE_DIRECTORY/wpa_cli" "$USB_WIFI_CLI" || return 1
-    cp "$USB_WIFI_HARDWARE_DIRECTORY/rx3-ifrename" "$USB_WIFI_IFRENAME" || return 1
+    cp "$USB_WIFI_DIRECTORY/wpa-action.sh" "$USB_WIFI_ACTION" || return 1
+    cp "$USB_WIFI_HARDWARE_DIRECTORY/rx3-netctl" "$USB_WIFI_NETCTL" || return 1
     usb_wifi_stage_config || return 1
-    chmod 700 "$USB_WIFI_SUPPLICANT" "$USB_WIFI_CLI" "$USB_WIFI_IFRENAME" || return 1
+    chmod 700 "$USB_WIFI_SUPPLICANT" "$USB_WIFI_CLI" "$USB_WIFI_ACTION" \
+        "$USB_WIFI_NETCTL" || return 1
 }
 
 usb_wifi_stop_owned_supplicant()
@@ -210,28 +219,89 @@ usb_wifi_start_supplicant()
     rm -f "$USB_WIFI_PID_FILE" "$USB_WIFI_LOG"
     rm -f "$USB_WIFI_RUNTIME_DIRECTORY/control/$USB_WIFI_INTERFACE"
     ifconfig "$USB_WIFI_INTERFACE" up >/dev/null 2>&1 || return 1
-    "$USB_WIFI_SUPPLICANT" -D"$USB_WIFI_SUPPLICANT_DRIVER" -i"$USB_WIFI_INTERFACE" \
+    "$USB_WIFI_SUPPLICANT" -W -D"$USB_WIFI_SUPPLICANT_DRIVER" -i"$USB_WIFI_INTERFACE" \
         -c"$USB_WIFI_RUNTIME_CONFIG" >"$USB_WIFI_LOG" 2>&1 &
     supplicant_pid=$!
     echo "$supplicant_pid" > "$USB_WIFI_PID_FILE"
-    sleep 1
     kill -0 "$supplicant_pid" 2>/dev/null || {
         say "USB Wi-Fi disabled: wpa_supplicant did not start"
         return 1
     }
 }
 
-usb_wifi_wait_for_association()
+usb_wifi_cancel_association_wait()
 {
-    attempts=0
-    while [ "$attempts" -lt 30 ]; do
-        [ "$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)" = "1" ] && \
-            return 0
-        sleep 1
-        attempts=$((attempts + 1))
-    done
+    [ -n "$USB_WIFI_TIMEOUT_PID" ] && \
+        kill "$USB_WIFI_TIMEOUT_PID" >/dev/null 2>&1 || true
+    [ -n "$USB_WIFI_EVENT_PID" ] && \
+        kill "$USB_WIFI_EVENT_PID" >/dev/null 2>&1 || true
+    [ -n "$USB_WIFI_TIMEOUT_PID" ] && \
+        wait "$USB_WIFI_TIMEOUT_PID" 2>/dev/null || true
+    [ -n "$USB_WIFI_EVENT_PID" ] && \
+        wait "$USB_WIFI_EVENT_PID" 2>/dev/null || true
+    if [ "$USB_WIFI_EVENT_FD_OPEN" = "1" ]; then
+        exec 9>&-
+        USB_WIFI_EVENT_FD_OPEN=0
+    fi
+    rm -f "$USB_WIFI_EVENT_FIFO"
+    USB_WIFI_EVENT_PID=
+    USB_WIFI_TIMEOUT_PID=
+}
+
+usb_wifi_begin_association()
+{
+    usb_wifi_cancel_association_wait
+    mkfifo "$USB_WIFI_EVENT_FIFO" || return 1
+    exec 9<> "$USB_WIFI_EVENT_FIFO" || {
+        rm -f "$USB_WIFI_EVENT_FIFO"
+        return 1
+    }
+    USB_WIFI_EVENT_FD_OPEN=1
+
+    usb_wifi_start_supplicant || {
+        usb_wifi_cancel_association_wait
+        return 1
+    }
+
+    USB_WIFI_EVENT_FIFO=$USB_WIFI_EVENT_FIFO \
+        "$USB_WIFI_CLI" -p "$USB_WIFI_RUNTIME_DIRECTORY/control" \
+        -i "$USB_WIFI_INTERFACE" -a "$USB_WIFI_ACTION" -r \
+        >> "$USB_WIFI_LOG" 2>&1 &
+    USB_WIFI_EVENT_PID=$!
+    (
+        trap 'kill "$association_sleep_pid" 2>/dev/null; exit 0' TERM INT
+        sleep "$USB_WIFI_ASSOCIATION_TIMEOUT" &
+        association_sleep_pid=$!
+        wait "$association_sleep_pid" || exit
+        printf '%s\n' TIMEOUT > "$USB_WIFI_EVENT_FIFO"
+    ) &
+    USB_WIFI_TIMEOUT_PID=$!
+    USB_WIFI_ASSOCIATION_STATE=pending
+}
+
+usb_wifi_finish_association()
+{
+    [ "$USB_WIFI_ASSOCIATION_STATE" = "pending" ] || return 0
+    association_event=
+    read -r association_event <&9
+    usb_wifi_cancel_association_wait
+
+    if [ "$association_event" = "CONNECTED" ]; then
+        USB_WIFI_ASSOCIATION_STATE=connected
+        return 0
+    fi
+
+    USB_WIFI_ASSOCIATION_STATE=failed
     say "USB Wi-Fi disabled: association timed out"
     return 1
+}
+
+usb_wifi_abort_association()
+{
+    [ "$USB_WIFI_ASSOCIATION_STATE" = "pending" ] || return 0
+    usb_wifi_cancel_association_wait
+    usb_wifi_stop_owned_supplicant >/dev/null 2>&1 || true
+    USB_WIFI_ASSOCIATION_STATE=idle
 }
 
 usb_wifi_restore_original_links()
@@ -282,13 +352,13 @@ usb_wifi_reset_adapter()
 
 usb_wifi_associate()
 {
-    if usb_wifi_start_supplicant && usb_wifi_wait_for_association; then
+    if usb_wifi_begin_association && usb_wifi_finish_association; then
         return 0
     fi
 
     say "USB Wi-Fi association retry: resetting $USB_WIFI_TOPOLOGY"
     usb_wifi_reset_adapter || return 1
-    if usb_wifi_start_supplicant && usb_wifi_wait_for_association; then
+    if usb_wifi_begin_association && usb_wifi_finish_association; then
         return 0
     fi
 
@@ -322,7 +392,7 @@ usb_wifi_release_application_name()
 {
     attempts=0
     while [ "$attempts" -lt 3 ]; do
-        "$USB_WIFI_IFRENAME" "$USB_WIFI_APPLICATION_INTERFACE" \
+        "$USB_WIFI_NETCTL" rename "$USB_WIFI_APPLICATION_INTERFACE" \
             "$USB_WIFI_SOURCE_INTERFACE" >/dev/null 2>&1 && return 0
         attempts=$((attempts + 1))
         sleep 1
@@ -330,17 +400,12 @@ usb_wifi_release_application_name()
 
     say "USB Wi-Fi rollback: unbinding the adapter to reclaim $USB_WIFI_APPLICATION_INTERFACE"
     usb_wifi_unbind_adapter || return 1
-    attempts=0
-    while [ "$attempts" -lt 3 ]; do
-        [ ! -e "$USB_WIFI_NET_SYSFS/$USB_WIFI_APPLICATION_INTERFACE" ] && return 0
-        attempts=$((attempts + 1))
-        sleep 1
-    done
-    return 1
+    "$USB_WIFI_NETCTL" absent "$USB_WIFI_APPLICATION_INTERFACE" 3
 }
 
 usb_wifi_rollback_swap()
 {
+    usb_wifi_abort_association
     [ "$USB_WIFI_SWAP_CHANGED" = "1" ] || return 0
     usb_wifi_stop_owned_supplicant >/dev/null 2>&1 || true
     [ -e "$USB_WIFI_NET_SYSFS/$USB_WIFI_REAR_INTERFACE" ] || {
@@ -355,7 +420,7 @@ usb_wifi_rollback_swap()
         usb_wifi_release_application_name || return 1
     fi
     [ ! -e "$USB_WIFI_NET_SYSFS/$USB_WIFI_APPLICATION_INTERFACE" ] || return 1
-    "$USB_WIFI_IFRENAME" "$USB_WIFI_REAR_INTERFACE" \
+    "$USB_WIFI_NETCTL" rename "$USB_WIFI_REAR_INTERFACE" \
         "$USB_WIFI_APPLICATION_INTERFACE" >/dev/null 2>&1 || return 1
     USB_WIFI_INTERFACE=$USB_WIFI_SOURCE_INTERFACE
     USB_WIFI_SWAP_CHANGED=0
@@ -378,12 +443,12 @@ usb_wifi_swap_interfaces()
        [ "$USB_WIFI_SOURCE_INTERFACE" != "$USB_WIFI_APPLICATION_INTERFACE" ]; then
         usb_wifi_stop_owned_supplicant || return 1
         ifconfig "$USB_WIFI_SOURCE_INTERFACE" down >/dev/null 2>&1 || return 1
-        "$USB_WIFI_IFRENAME" "$USB_WIFI_SOURCE_INTERFACE" \
+        "$USB_WIFI_NETCTL" rename "$USB_WIFI_SOURCE_INTERFACE" \
             "$USB_WIFI_APPLICATION_INTERFACE" >/dev/null 2>&1 || return 1
         USB_WIFI_INTERFACE=$USB_WIFI_APPLICATION_INTERFACE
-        if ! usb_wifi_start_supplicant || ! usb_wifi_wait_for_association; then
+        if ! usb_wifi_begin_association; then
             ifconfig "$USB_WIFI_APPLICATION_INTERFACE" down >/dev/null 2>&1 || true
-            "$USB_WIFI_IFRENAME" "$USB_WIFI_APPLICATION_INTERFACE" \
+            "$USB_WIFI_NETCTL" rename "$USB_WIFI_APPLICATION_INTERFACE" \
                 "$USB_WIFI_SOURCE_INTERFACE" >/dev/null 2>&1 || true
             USB_WIFI_INTERFACE=$USB_WIFI_SOURCE_INTERFACE
             return 1
@@ -425,14 +490,14 @@ usb_wifi_swap_interfaces()
             usb_wifi_restore_original_links
             return 1
         }
-        "$USB_WIFI_IFRENAME" "$USB_WIFI_APPLICATION_INTERFACE" \
+        "$USB_WIFI_NETCTL" rename "$USB_WIFI_APPLICATION_INTERFACE" \
             "$USB_WIFI_REAR_INTERFACE" >/dev/null 2>&1 || {
             say "USB Wi-Fi disabled: could not preserve rear interface"
             usb_wifi_restore_original_links
             return 1
         }
         USB_WIFI_SWAP_CHANGED=1
-        "$USB_WIFI_IFRENAME" "$USB_WIFI_SOURCE_INTERFACE" \
+        "$USB_WIFI_NETCTL" rename "$USB_WIFI_SOURCE_INTERFACE" \
             "$USB_WIFI_APPLICATION_INTERFACE" >/dev/null 2>&1 || {
             say "USB Wi-Fi disabled: could not assign stock interface name"
             usb_wifi_rollback_swap || \
@@ -444,48 +509,18 @@ usb_wifi_swap_interfaces()
     USB_WIFI_INTERFACE=$USB_WIFI_APPLICATION_INTERFACE
     usb_wifi_configure_rear_interface || \
         say "USB Wi-Fi warning: rear USB-B management address is unavailable"
-    if ! usb_wifi_start_supplicant || ! usb_wifi_wait_for_association; then
-        say "USB Wi-Fi disabled: association failed after interface swap"
+    if ! usb_wifi_begin_association; then
+        say "USB Wi-Fi disabled: could not start association after interface swap"
         usb_wifi_rollback_swap || \
             say "USB Wi-Fi warning: complete interface rollback failed"
         return 1
     fi
-    say "USB Wi-Fi owns $USB_WIFI_APPLICATION_INTERFACE; rear USB-B is $USB_WIFI_REAR_INTERFACE"
-}
-
-usb_wifi_lan_address()
-{
-    ifconfig "$USB_WIFI_INTERFACE" 2>/dev/null | awk '
-        {
-            for (field = 1; field <= NF; field++) {
-                address = ""
-                if ($field ~ /^addr:/) {
-                    address = $field
-                    sub(/^addr:/, "", address)
-                } else if ($field == "inet" && field < NF) {
-                    address = $(field + 1)
-                    sub(/^addr:/, "", address)
-                }
-                if (address != "" && address !~ /^169\.254\./ &&
-                    address !~ /^127\./ && address != "0.0.0.0") {
-                    print address
-                    exit
-                }
-            }
-        }
-    '
+    say "USB Wi-Fi owns $USB_WIFI_APPLICATION_INTERFACE; association started while rbp launches"
 }
 
 usb_wifi_wait_for_dhcp()
 {
-    attempts=$1
-    while [ "$attempts" -gt 0 ]; do
-        USB_WIFI_ADDRESS=$(usb_wifi_lan_address)
-        [ -n "$USB_WIFI_ADDRESS" ] && return 0
-        sleep 1
-        attempts=$((attempts - 1))
-    done
-    return 1
+    USB_WIFI_ADDRESS=$("$USB_WIFI_NETCTL" ipv4 "$USB_WIFI_INTERFACE" "$1")
 }
 
 usb_wifi_dhcp_running()
@@ -511,7 +546,7 @@ usb_wifi_recover_dhcp()
 
 usb_wifi_finish_network()
 {
-    if usb_wifi_wait_for_dhcp "$USB_WIFI_DHCP_ATTEMPTS"; then
+    if usb_wifi_wait_for_dhcp "$USB_WIFI_DHCP_TIMEOUT"; then
         USB_WIFI_DHCP_STATE=rbp-bound
         say "USB Wi-Fi lease acquired: $USB_WIFI_ADDRESS"
         return 0
@@ -523,7 +558,7 @@ usb_wifi_finish_network()
         return 1
     }
 
-    if usb_wifi_wait_for_dhcp "$USB_WIFI_DHCP_RETRY_ATTEMPTS"; then
+    if usb_wifi_wait_for_dhcp "$USB_WIFI_DHCP_RETRY_TIMEOUT"; then
         USB_WIFI_DHCP_STATE=recovery-bound
         say "USB Wi-Fi recovery lease acquired: $USB_WIFI_ADDRESS"
         return 0
@@ -549,6 +584,7 @@ usb_wifi_write_state()
         echo "rear_interface=$USB_WIFI_REAR_INTERFACE"
         echo "rear_ipv4=$USB_WIFI_REAR_ADDRESS"
         echo "usb_topology=$USB_WIFI_TOPOLOGY"
+        echo "association=$USB_WIFI_ASSOCIATION_STATE"
         echo "carrier=$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)"
         echo "wifi_connected=$wifi_connected"
         echo "wifi_ssid=$wifi_ssid"
@@ -579,8 +615,13 @@ usb_wifi_prepare()
 
 usb_wifi_after_launch()
 {
-    usb_wifi_finish_network
-    network_status=$?
+    if usb_wifi_finish_association; then
+        usb_wifi_finish_network
+        network_status=$?
+    else
+        network_status=1
+    fi
+
     usb_wifi_write_state || return 1
     return "$network_status"
 }
