@@ -207,6 +207,7 @@ class UsbWifiTests(unittest.TestCase):
         self.assertIn('echo "application_interface=$USB_WIFI_APPLICATION_INTERFACE"', MODULE)
         self.assertIn('echo "rear_interface=$USB_WIFI_REAR_INTERFACE"', MODULE)
         self.assertIn('echo "wifi_connected=$wifi_connected"', MODULE)
+        self.assertIn('echo "wifi_ssid=$wifi_ssid"', MODULE)
         self.assertIn('echo "wifi_address=$USB_WIFI_ADDRESS"', MODULE)
         self.assertIn('echo "dhcp=$USB_WIFI_DHCP_STATE"', MODULE)
         self.assertIn('echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"', MODULE)
@@ -218,6 +219,10 @@ class UsbWifiTests(unittest.TestCase):
         self.assertIn(
             '"$USB_WIFI_STATE" wifi_connected', MODULE
         )
+        self.assertIn(
+            'register_menu_item RX3-TOOLKIT "WIFI SSID" field', MODULE
+        )
+        self.assertIn('"$USB_WIFI_STATE" wifi_ssid', MODULE)
         self.assertIn(
             'register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field', MODULE
         )
@@ -232,6 +237,12 @@ class UsbWifiTests(unittest.TestCase):
             interface = root / "net/eth0"
             interface.mkdir(parents=True)
             (interface / "carrier").write_text("1\n")
+            cli = root / "wpa_cli"
+            cli.write_text(
+                "#!/bin/sh\n"
+                "printf 'wpa_state=%s\\nssid=%s\\n' \"$TEST_WPA_STATE\" \"$TEST_SSID\"\n"
+            )
+            cli.chmod(0o755)
             harness = root / "harness.sh"
             harness.write_text(
                 "set -eu\n"
@@ -248,16 +259,22 @@ class UsbWifiTests(unittest.TestCase):
                 f"USB_WIFI_NET_SYSFS='{root / 'net'}'\n"
                 f". '{HERE / 'module.sh'}'\n"
                 "USB_WIFI_INTERFACE=eth0\n"
+                f"USB_WIFI_CLI='{cli}'\n"
                 "USB_WIFI_ADDRESS=10.0.0.144\n"
-                "usb_wifi_wpa_state() { echo COMPLETED; }\n"
+                "TEST_WPA_STATE=COMPLETED\n"
+                "TEST_SSID='Studio=5G'\n"
+                "export TEST_WPA_STATE TEST_SSID\n"
                 "ifconfig() { :; }\n"
                 "usb_wifi_write_state\n"
                 f"grep -qx 'wifi_connected=YES' '{state}'\n"
+                f"grep -qx 'wifi_ssid=Studio=5G' '{state}'\n"
                 f"grep -qx 'wifi_address=10.0.0.144' '{state}'\n"
                 "USB_WIFI_ADDRESS=\n"
-                "usb_wifi_wpa_state() { echo DISCONNECTED; }\n"
+                "TEST_WPA_STATE=DISCONNECTED\n"
+                "TEST_SSID=\n"
                 "usb_wifi_write_state\n"
                 f"grep -qx 'wifi_connected=NO' '{state}'\n"
+                f"grep -qx 'wifi_ssid=' '{state}'\n"
                 f"grep -qx 'wifi_address=' '{state}'\n"
             )
             subprocess.run(["sh", str(harness)], check=True)

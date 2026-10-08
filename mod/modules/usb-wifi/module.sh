@@ -46,6 +46,8 @@ USB_WIFI_SWAP_CHANGED=0
 register_diagnostic_file "$USB_WIFI_LOG"
 register_menu_item RX3-TOOLKIT "WIFI CONNECTED" field \
     "$USB_WIFI_STATE" wifi_connected
+register_menu_item RX3-TOOLKIT "WIFI SSID" field \
+    "$USB_WIFI_STATE" wifi_ssid
 register_menu_item RX3-TOOLKIT "WIFI ADDRESS" field \
     "$USB_WIFI_STATE" wifi_address
 
@@ -294,11 +296,16 @@ usb_wifi_associate()
     return 1
 }
 
-usb_wifi_wpa_state()
+usb_wifi_wpa_value()
 {
     "$USB_WIFI_CLI" -p "$USB_WIFI_RUNTIME_DIRECTORY/control" \
-        -i "$USB_WIFI_INTERFACE" status 2>/dev/null | awk -F= \
-        '$1 == "wpa_state" { print $2; exit }'
+        -i "$USB_WIFI_INTERFACE" status 2>/dev/null | awk -v key="$1" \
+        'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }'
+}
+
+usb_wifi_wpa_state()
+{
+    usb_wifi_wpa_value wpa_state
 }
 
 usb_wifi_existing_association()
@@ -531,6 +538,7 @@ usb_wifi_write_state()
 {
     wifi_connected=NO
     [ "$(usb_wifi_wpa_state)" = "COMPLETED" ] && wifi_connected=YES
+    wifi_ssid=$(usb_wifi_wpa_value ssid)
 
     {
         echo "hardware_profile=$USB_WIFI_PROFILE_ID"
@@ -543,6 +551,7 @@ usb_wifi_write_state()
         echo "usb_topology=$USB_WIFI_TOPOLOGY"
         echo "carrier=$(cat "$USB_WIFI_NET_SYSFS/$USB_WIFI_INTERFACE/carrier" 2>/dev/null)"
         echo "wifi_connected=$wifi_connected"
+        echo "wifi_ssid=$wifi_ssid"
         echo "wifi_address=$USB_WIFI_ADDRESS"
         echo "dhcp=$USB_WIFI_DHCP_STATE"
         echo "ipv4_address=${USB_WIFI_ADDRESS:-none}"
